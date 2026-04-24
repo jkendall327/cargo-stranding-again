@@ -1,14 +1,16 @@
 use bevy_ecs::prelude::*;
 
 use crate::components::*;
+use crate::energy::{
+    ActionEnergy, DEFAULT_ACTION_ENERGY_COST, PICKUP_ENERGY_COST, WAIT_ENERGY_COST,
+};
 use crate::map::Map;
 use crate::movement::{
-    resolve_movement, terrain_cooldown_cost, CargoLoad, MovementOutcome, MovementRequest,
-    StaminaBudget,
+    resolve_movement, CargoLoad, MovementOutcome, MovementRequest, StaminaBudget,
 };
 use crate::resources::{
-    Direction, GameScreen, MenuAction, MenuInputState, PauseMenuEntry, PauseMenuState,
-    PlayerAction, PlayerIntent, SimulationClock, TurnState,
+    Direction, EnergyTimeline, GameScreen, MenuAction, MenuInputState, PauseMenuEntry,
+    PauseMenuState, PlayerAction, PlayerIntent, SimulationClock,
 };
 
 type AgentJobItem<'a> = (
@@ -17,20 +19,10 @@ type AgentJobItem<'a> = (
     &'a mut Velocity,
     &'a mut Cargo,
     &'a mut AssignedJob,
-    &'a mut StepCooldown,
+    &'a mut ActionEnergy,
 );
 
 const WAIT_STAMINA_RECOVERY: f32 = 3.0;
-
-pub fn tick_clock(mut clock: ResMut<SimulationClock>) {
-    clock.turn += 1;
-}
-
-pub fn tick_cooldowns(mut query: Query<&mut StepCooldown>) {
-    for mut cooldown in &mut query {
-        cooldown.frames = cooldown.frames.saturating_sub(1);
-    }
-}
 
 pub fn menu_navigation(
     input: Res<MenuInputState>,
@@ -65,10 +57,37 @@ pub fn menu_navigation(
     }
 }
 
+pub fn advance_timeline_for_player_intent(world: &mut World) {
+    if world.resource::<PlayerIntent>().action.is_none() {
+        return;
+    }
+
+    if let Some(player_ready_at) = player_ready_at(world) {
+        let now = world.resource::<EnergyTimeline>().now;
+        if player_ready_at > now {
+            world.resource_mut::<EnergyTimeline>().now = player_ready_at;
+            catch_up_agents(world);
+        }
+    }
+
+    if process_player_action(world) {
+        world.resource_mut::<SimulationClock>().turn += 1;
+        if let Some(player_ready_at) = player_ready_at(world) {
+            world.resource_mut::<EnergyTimeline>().now = player_ready_at;
+            catch_up_agents(world);
+        }
+    }
+}
+
+fn player_ready_at(world: &mut World) -> Option<u64> {
+    let mut query = world.query_filtered::<&ActionEnergy, With<Player>>();
+    query.iter(world).next().map(|energy| energy.ready_at)
+}
+
 pub fn player_actions(
     intent: Res<PlayerIntent>,
+    timeline: Res<EnergyTimeline>,
     map: Res<Map>,
-    mut turn: ResMut<TurnState>,
     mut player_query: Query<
         (
             Entity,
@@ -77,19 +96,31 @@ pub fn player_actions(
             &mut Stamina,
             &mut Cargo,
             &mut MovementState,
+            &mut ActionEnergy,
         ),
         With<Player>,
     >,
     mut parcels: Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
 ) {
-    turn.consumed = false;
+    let now = timeline.now;
 
     let map = &*map;
-    let Ok((entity, mut position, mut velocity, mut stamina, mut cargo, mut movement_state)) =
-        player_query.get_single_mut()
+    let Ok((
+        entity,
+        mut position,
+        mut velocity,
+        mut stamina,
+        mut cargo,
+        mut movement_state,
+        mut energy,
+    )) = player_query.get_single_mut()
     else {
         return;
     };
+
+    if !energy.is_ready(now) {
+        return;
+    }
 
     velocity.dx = 0;
     velocity.dy = 0;
@@ -100,7 +131,7 @@ pub fn player_actions(
 
     if action == PlayerAction::Wait {
         stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
-        turn.consumed = true;
+        energy.spend(now, WAIT_ENERGY_COST);
         return;
     }
 
@@ -125,12 +156,12 @@ pub fn player_actions(
                 velocity.dx = result.actual_delta.0;
                 velocity.dy = result.actual_delta.1;
                 stamina.current = (stamina.current + result.stamina_delta).clamp(0.0, stamina.max);
-                turn.consumed = result.turn_cost > 0;
+                energy.spend(now, result.energy_cost);
             }
         }
         PlayerAction::PickUp => {
             if pick_up_loose_parcel(entity, *position, &mut cargo, &mut parcels) {
-                turn.consumed = true;
+                energy.spend(now, PICKUP_ENERGY_COST);
             }
         }
         PlayerAction::ToggleSprint => {
@@ -138,6 +169,21 @@ pub fn player_actions(
         }
         PlayerAction::Wait => {}
     }
+}
+
+fn process_player_action(world: &mut World) -> bool {
+    if world.resource::<PlayerIntent>().action.is_none() {
+        return false;
+    }
+
+    let mut schedule = Schedule::default();
+    schedule.add_systems(player_actions);
+    schedule.run(world);
+
+    let mut query = world.query_filtered::<&ActionEnergy, With<Player>>();
+    query.iter(world).next().is_some_and(|energy| {
+        energy.last_cost > 0 && energy.ready_at > world.resource::<EnergyTimeline>().now
+    })
 }
 
 fn pick_up_loose_parcel(
@@ -188,103 +234,102 @@ pub fn assign_agent_jobs(
 
 pub fn agent_jobs(
     map: Res<Map>,
+    timeline: Res<EnergyTimeline>,
     mut clock: ResMut<SimulationClock>,
     mut agents: Query<AgentJobItem, With<Agent>>,
     mut parcels: Query<(&Position, &CargoParcel, &mut ParcelState), Without<Agent>>,
 ) {
     let map = &*map;
-    for (agent_entity, mut position, mut velocity, mut cargo, mut job, mut cooldown) in &mut agents
-    {
+    let now = timeline.now;
+    for (agent_entity, mut position, mut velocity, mut cargo, mut job, mut energy) in &mut agents {
         velocity.dx = 0;
         velocity.dy = 0;
 
-        if cooldown.frames > 0 {
-            continue;
-        }
-
-        let Some(parcel_entity) = job.parcel else {
-            continue;
-        };
-        let Ok((parcel_position, parcel, mut parcel_state)) = parcels.get_mut(parcel_entity) else {
-            job.phase = JobPhase::FindParcel;
-            job.parcel = None;
-            continue;
-        };
-
-        match job.phase {
-            JobPhase::FindParcel | JobPhase::Done => {}
-            JobPhase::GoToParcel => {
-                if *parcel_state != ParcelState::AssignedTo(agent_entity) {
-                    job.phase = JobPhase::FindParcel;
-                    job.parcel = None;
-                    continue;
-                }
-
-                if position.x == parcel_position.x && position.y == parcel_position.y {
-                    *parcel_state = ParcelState::CarriedBy(agent_entity);
-                    cargo.current_weight += parcel.weight;
-                    job.phase = JobPhase::GoToDepot;
-                    cooldown.frames = 10;
-                    continue;
-                }
-
-                step_agent_toward(
-                    map,
-                    agent_entity,
-                    &mut position,
-                    &mut velocity,
-                    &mut cooldown,
-                    cargo.current_weight,
-                    cargo.max_weight,
-                    *parcel_position,
-                );
+        for _ in 0..128 {
+            if !energy.is_ready(now) {
+                break;
             }
-            JobPhase::GoToDepot => {
-                if position.x == map.depot.0 && position.y == map.depot.1 {
-                    *parcel_state = ParcelState::Delivered;
-                    cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
-                    clock.delivered_parcels += 1;
-                    job.phase = JobPhase::Done;
-                    job.parcel = None;
-                    cooldown.frames = 18;
-                    continue;
-                }
 
-                step_agent_toward(
-                    map,
-                    agent_entity,
-                    &mut position,
-                    &mut velocity,
-                    &mut cooldown,
-                    cargo.current_weight,
-                    cargo.max_weight,
-                    Position {
-                        x: map.depot.0,
-                        y: map.depot.1,
-                    },
-                );
+            let Some(parcel_entity) = job.parcel else {
+                break;
+            };
+            let Ok((parcel_position, parcel, mut parcel_state)) = parcels.get_mut(parcel_entity)
+            else {
+                job.phase = JobPhase::FindParcel;
+                job.parcel = None;
+                break;
+            };
+
+            match job.phase {
+                JobPhase::FindParcel | JobPhase::Done => break,
+                JobPhase::GoToParcel => {
+                    if *parcel_state != ParcelState::AssignedTo(agent_entity) {
+                        job.phase = JobPhase::FindParcel;
+                        job.parcel = None;
+                        break;
+                    }
+
+                    if position.x == parcel_position.x && position.y == parcel_position.y {
+                        *parcel_state = ParcelState::CarriedBy(agent_entity);
+                        cargo.current_weight += parcel.weight;
+                        job.phase = JobPhase::GoToDepot;
+                        energy.spend(now, PICKUP_ENERGY_COST);
+                        continue;
+                    }
+
+                    if let Some(moved) = greedy_step(
+                        map,
+                        agent_entity,
+                        &mut position,
+                        cargo.current_weight,
+                        cargo.max_weight,
+                        *parcel_position,
+                    ) {
+                        velocity.dx = moved.actual_delta.0;
+                        velocity.dy = moved.actual_delta.1;
+                        energy.spend(now, moved.energy_cost);
+                    } else {
+                        energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
+                    }
+                }
+                JobPhase::GoToDepot => {
+                    if position.x == map.depot.0 && position.y == map.depot.1 {
+                        *parcel_state = ParcelState::Delivered;
+                        cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
+                        clock.delivered_parcels += 1;
+                        job.phase = JobPhase::Done;
+                        job.parcel = None;
+                        energy.spend(now, PICKUP_ENERGY_COST);
+                        continue;
+                    }
+
+                    if let Some(moved) = greedy_step(
+                        map,
+                        agent_entity,
+                        &mut position,
+                        cargo.current_weight,
+                        cargo.max_weight,
+                        Position {
+                            x: map.depot.0,
+                            y: map.depot.1,
+                        },
+                    ) {
+                        velocity.dx = moved.actual_delta.0;
+                        velocity.dy = moved.actual_delta.1;
+                        energy.spend(now, moved.energy_cost);
+                    } else {
+                        energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
+                    }
+                }
             }
         }
     }
 }
 
-fn step_agent_toward(
-    map: &Map,
-    entity: Entity,
-    position: &mut Position,
-    velocity: &mut Velocity,
-    cooldown: &mut StepCooldown,
-    current_weight: f32,
-    max_weight: f32,
-    target: Position,
-) {
-    if let Some(moved) = greedy_step(map, entity, position, current_weight, max_weight, target) {
-        velocity.dx = moved.actual_delta.0;
-        velocity.dy = moved.actual_delta.1;
-        cooldown.frames = moved.cooldown_cost;
-    } else {
-        cooldown.frames = step_delay(map, position.x, position.y);
-    }
+fn catch_up_agents(world: &mut World) {
+    let mut schedule = Schedule::default();
+    schedule.add_systems((assign_agent_jobs, agent_jobs));
+    schedule.run(world);
 }
 
 fn greedy_step(
@@ -328,10 +373,6 @@ fn greedy_step(
     None
 }
 
-fn step_delay(map: &Map, x: i32, y: i32) -> u32 {
-    map.terrain_at(x, y).map_or(11, terrain_cooldown_cost)
-}
-
 fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
     match (dx, dy) {
         (-1, 0) => Some(Direction::West),
@@ -361,7 +402,7 @@ mod tests {
                 phase: JobPhase::FindParcel,
                 parcel: None,
             },
-            StepCooldown::default(),
+            ActionEnergy::default(),
         ));
     }
 
@@ -383,6 +424,7 @@ mod tests {
                 max: 35.0,
             },
             MovementState::default(),
+            ActionEnergy::default(),
         ));
     }
 
@@ -426,7 +468,7 @@ mod tests {
         world.insert_resource(PlayerIntent {
             action: Some(PlayerAction::Move(direction)),
         });
-        world.insert_resource(TurnState::default());
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_player(world, start, stamina);
 
         let mut schedule = Schedule::default();
@@ -441,15 +483,19 @@ mod tests {
         world.insert_resource(PlayerIntent {
             action: Some(PlayerAction::Move(Direction::West)),
         });
-        world.insert_resource(TurnState { consumed: true });
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
         schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
-        let turn = world.resource::<TurnState>();
-        assert!(!turn.consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(energy.ready_at, 0);
 
         let mut player_query = world.query_filtered::<&Position, With<Player>>();
         let position = player_query
@@ -468,8 +514,12 @@ mod tests {
 
         run_player_move(&mut world, start, target, 10.0);
 
-        let turn = world.resource::<TurnState>();
-        assert!(turn.consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert!(energy.ready_at > 0);
 
         let mut player_query = world.query_filtered::<&Stamina, With<Player>>();
         let stamina = player_query
@@ -491,8 +541,12 @@ mod tests {
 
         run_player_move(&mut world, start, target, 10.0);
 
-        let turn = world.resource::<TurnState>();
-        assert!(turn.consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert!(energy.ready_at > 0);
 
         let mut player_query = world.query_filtered::<&Stamina, With<Player>>();
         let stamina = player_query
@@ -509,15 +563,19 @@ mod tests {
         world.insert_resource(PlayerIntent {
             action: Some(PlayerAction::Wait),
         });
-        world.insert_resource(TurnState::default());
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 10.0);
 
         let mut schedule = Schedule::default();
         schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
-        let turn = world.resource::<TurnState>();
-        assert!(turn.consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert!(energy.ready_at > 0);
 
         let mut player_query = world.query_filtered::<&Stamina, With<Player>>();
         let stamina = player_query
@@ -534,14 +592,19 @@ mod tests {
         world.insert_resource(PlayerIntent {
             action: Some(PlayerAction::ToggleSprint),
         });
-        world.insert_resource(TurnState::default());
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
         schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
-        assert!(!world.resource::<TurnState>().consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(energy.ready_at, 0);
 
         let mut player_query = world.query_filtered::<&MovementState, With<Player>>();
         let movement_state = player_query
@@ -561,7 +624,7 @@ mod tests {
         world.insert_resource(PlayerIntent {
             action: Some(PlayerAction::PickUp),
         });
-        world.insert_resource(TurnState::default());
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
         spawn_test_parcel(&mut world, Position { x: 2, y: 2 });
 
@@ -569,7 +632,12 @@ mod tests {
         schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
-        assert!(world.resource::<TurnState>().consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert!(energy.ready_at > 0);
 
         let mut cargo_query = world.query_filtered::<&Cargo, With<Player>>();
         let cargo = cargo_query
@@ -593,14 +661,19 @@ mod tests {
         world.insert_resource(PlayerIntent {
             action: Some(PlayerAction::PickUp),
         });
-        world.insert_resource(TurnState { consumed: true });
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
 
         let mut schedule = Schedule::default();
         schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
-        assert!(!world.resource::<TurnState>().consumed);
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(energy.ready_at, 0);
     }
 
     #[test]
@@ -681,6 +754,7 @@ mod tests {
             turn: 0,
             delivered_parcels: 0,
         });
+        world.insert_resource(EnergyTimeline::default());
         spawn_test_agent(
             &mut world,
             0,
@@ -698,9 +772,10 @@ mod tests {
         );
 
         let mut schedule = Schedule::default();
-        schedule.add_systems((tick_cooldowns, assign_agent_jobs, agent_jobs));
+        schedule.add_systems((assign_agent_jobs, agent_jobs));
         for _ in 0..12 {
             schedule.run(&mut world);
+            world.resource_mut::<EnergyTimeline>().now += 100;
         }
 
         let clock = world.resource::<SimulationClock>();

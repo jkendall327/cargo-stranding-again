@@ -1,5 +1,6 @@
 use bevy_ecs::prelude::*;
 
+pub use crate::energy::ActionEnergy;
 use crate::movement::MovementMode;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,9 +82,4 @@ pub enum JobPhase {
     GoToParcel,
     GoToDepot,
     Done,
-}
-
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct StepCooldown {
-    pub frames: u32,
 }

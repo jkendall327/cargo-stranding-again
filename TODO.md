@@ -121,45 +121,45 @@ Design decisions:
 
 Implementation tasks:
 
-- [ ] Add an `ActionEnergy` component.
-  - [ ] Track current energy and maximum/ready threshold.
-  - [ ] Decide whether actors start ready or accumulate energy from zero.
-  - [ ] Keep values integer if possible for deterministic scheduling.
-- [ ] Define action energy costs.
-  - [ ] Walking movement baseline, e.g. `100`.
-  - [ ] Sprinting movement cheaper than walking, e.g. `60`, before terrain/load modifiers.
-  - [ ] Wait/rest baseline.
-  - [ ] Pickup/drop baseline.
-  - [ ] Future interact/combat placeholders.
-- [ ] Extend movement resolution to report `energy_cost`.
-  - [ ] Keep `resolve_movement` single-tile and pure.
-  - [ ] Apply terrain/load/movement-mode modifiers to energy cost.
-  - [ ] Preserve stamina delta and passability behavior.
-- [ ] Refactor turn advancement into an energy scheduler.
-  - [ ] Replace or demote the current `TurnState { consumed }` heartbeat.
-  - [ ] Add a scheduler resource or priority queue keyed by actor ready time.
-  - [ ] Let the player act only when ready.
-  - [ ] Let NPCs act according to the same energy rules.
-  - [ ] Keep failed actions from spending energy for now.
-- [ ] Update NPC porter movement to consume action energy instead of `StepCooldown`.
-  - [ ] Remove or adapt `StepCooldown` once energy covers the same need.
-  - [ ] Keep greedy pathing simple until pathfinding work starts.
-- [ ] Update pickup/drop and wait/rest to spend action energy.
-  - [ ] Successful pickup spends energy.
-  - [ ] Failed pickup spends no energy for now.
-  - [ ] Wait/rest spends energy and restores stamina.
-- [ ] Add UI/debug output.
-  - [ ] Show player energy/ready state.
-  - [ ] Show NPC energy/ready state in porter debug rows.
-  - [ ] Show current movement posture.
-- [ ] Add tests.
-  - [ ] Sprinting movement costs less energy than walking.
-  - [ ] Sprinting movement still costs more stamina than walking.
-  - [ ] Failed movement spends no energy.
-  - [ ] Successful pickup spends energy.
-  - [ ] Failed pickup spends no energy.
-  - [ ] Faster actor can act more often than slower actor over the same timeline.
-  - [ ] NPC delivery still progresses under energy scheduling.
+- [x] Add an `ActionEnergy` component.
+  - [x] Track actor `ready_at` time plus last spent cost.
+  - [x] Decide whether actors start ready or accumulate energy from zero.
+  - [x] Keep values integer if possible for deterministic scheduling.
+- [x] Define action energy costs.
+  - [x] Walking movement baseline, e.g. `100`.
+  - [x] Sprinting movement cheaper than walking, e.g. `60`, before terrain/load modifiers.
+  - [x] Wait/rest baseline.
+  - [x] Pickup/drop baseline.
+  - [x] Future interact/combat placeholders.
+- [x] Extend movement resolution to report `energy_cost`.
+  - [x] Keep `resolve_movement` single-tile and pure.
+  - [x] Apply terrain/load/movement-mode modifiers to energy cost.
+  - [x] Preserve stamina delta and passability behavior.
+- [x] Refactor turn advancement into an energy scheduler.
+  - [x] Replace or demote the current `TurnState { consumed }` heartbeat.
+  - [x] Add a scheduler resource or priority queue keyed by actor ready time.
+  - [x] Let the player act only when ready.
+  - [x] Let NPCs act according to the same energy rules.
+  - [x] Keep failed actions from spending energy for now.
+- [x] Update NPC porter movement to consume action energy instead of `StepCooldown`.
+  - [x] Remove or adapt `StepCooldown` once energy covers the same need.
+  - [x] Keep greedy pathing simple until pathfinding work starts.
+- [x] Update pickup/drop and wait/rest to spend action energy.
+  - [x] Successful pickup spends energy.
+  - [x] Failed pickup spends no energy for now.
+  - [x] Wait/rest spends energy and restores stamina.
+- [x] Add UI/debug output.
+  - [x] Show player energy/ready state.
+  - [x] Show NPC energy/ready state in porter debug rows.
+  - [x] Show current movement posture.
+- [x] Add tests.
+  - [x] Sprinting movement costs less energy than walking.
+  - [x] Sprinting movement still costs more stamina than walking.
+  - [x] Failed movement spends no energy.
+  - [x] Successful pickup spends energy.
+  - [x] Failed pickup spends no energy.
+  - [x] Faster actor can act more often than slower actor over the same timeline.
+  - [x] NPC delivery still progresses under energy scheduling.
 
 Momentum tasks for after the energy timeline:
 

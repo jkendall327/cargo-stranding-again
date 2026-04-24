@@ -168,8 +168,8 @@ pub struct SimulationClock {
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
-pub struct TurnState {
-    pub consumed: bool,
+pub struct EnergyTimeline {
+    pub now: u64,
 }
 
 #[derive(Resource, Clone, Copy, Debug)]

@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::Entity;
 
 use crate::components::Position;
+use crate::energy::movement_energy_cost;
 use crate::map::{Map, Terrain};
 use crate::resources::Direction;
 
@@ -60,6 +61,7 @@ pub struct MovementResult {
     pub stamina_delta: f32,
     pub turn_cost: u32,
     pub cooldown_cost: u32,
+    pub energy_cost: u32,
 }
 
 impl MovementOutcome {
@@ -114,6 +116,7 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
         stamina_delta: 0.0,
         turn_cost: 0,
         cooldown_cost: 0,
+        energy_cost: 0,
     };
 
     let Some(terrain) = terrain else {
@@ -135,6 +138,7 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
     result.actual_delta = requested_delta;
     result.turn_cost = 1;
     result.cooldown_cost = movement_cooldown_cost(terrain, request.mode);
+    result.energy_cost = movement_energy_cost(terrain, request.mode);
     MovementOutcome::Moved(result)
 }
 
@@ -324,6 +328,7 @@ mod tests {
         assert_eq!(walking.stamina_delta, 0.0);
         assert!(sprinting.stamina_delta < walking.stamina_delta);
         assert!(sprinting.cooldown_cost < walking.cooldown_cost);
+        assert!(sprinting.energy_cost < walking.energy_cost);
     }
 
     #[test]
@@ -344,5 +349,6 @@ mod tests {
 
         assert!(matches!(outcome, MovementOutcome::InsufficientStamina(_)));
         assert_eq!(outcome.result().turn_cost, 0);
+        assert_eq!(outcome.result().energy_cost, 0);
     }
 }

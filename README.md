@@ -25,8 +25,8 @@ cargo run
 - Grass is stamina-neutral.
 - Mud and rock drain stamina, with cargo making that drain worse.
 - Roads and the depot restore stamina when traversed.
-- Sprinting spends extra stamina and reduces movement cooldown.
-- Turns advance only when movement succeeds, pickup succeeds, or you wait. Failed movement and failed pickup do not consume a turn.
+- Sprinting spends extra stamina and reduces movement energy cost.
+- Timeline energy advances only when movement succeeds, pickup succeeds, or you wait. Failed movement and failed pickup do not spend energy.
 - Waiting recovers stamina directly.
 
 The prototype spawns loose cargo parcels, NPC porters, one depot, and simple delivery jobs. Porters greedily walk to parcels, pick them up, walk to the depot, and drop them off.

@@ -1,4 +1,5 @@
 mod components;
+mod energy;
 mod input;
 mod map;
 mod movement;
@@ -7,6 +8,7 @@ mod resources;
 mod systems;
 
 use bevy_ecs::prelude::*;
+use energy::ActionEnergy;
 use input::{KeyBinding, KeyBindings};
 use macroquad::prelude::*;
 
@@ -14,8 +16,8 @@ use components::*;
 use map::Map;
 use render::window_conf;
 use resources::{
-    Camera, GameScreen, InputRepeat, MenuAction, MenuInputState, PauseMenuState, PlayerAction,
-    PlayerIntent, SimulationClock, TurnState,
+    Camera, EnergyTimeline, GameScreen, InputRepeat, MenuAction, MenuInputState, PauseMenuState,
+    PlayerAction, PlayerIntent, SimulationClock,
 };
 
 #[macroquad::main(window_conf)]
@@ -24,18 +26,10 @@ async fn main() {
     init_world(&mut world);
 
     let mut player_schedule = Schedule::default();
-    player_schedule.add_systems(systems::player_actions);
+    player_schedule.add_systems(systems::advance_timeline_for_player_intent);
 
     let mut menu_schedule = Schedule::default();
     menu_schedule.add_systems(systems::menu_navigation);
-
-    let mut simulation_schedule = Schedule::default();
-    simulation_schedule.add_systems((
-        systems::tick_clock,
-        systems::tick_cooldowns,
-        systems::assign_agent_jobs,
-        systems::agent_jobs,
-    ));
 
     loop {
         // Macroquad owns the outer async frame loop and immediate-mode input.
@@ -43,16 +37,13 @@ async fn main() {
         copy_input_to_ecs(&mut world);
         menu_schedule.run(&mut world);
 
-        // Bevy ECS owns simulation state, but the sim is turn-based: first the
-        // player action is resolved, then NPC jobs and the clock advance only
-        // if that action actually consumed a turn.
+        // Bevy ECS owns simulation state. The energy timeline stays
+        // input-paced for now: player input advances time, and NPCs catch up
+        // to the player's next ready moment.
         if world.resource::<GameScreen>().allows_simulation()
             && world.resource::<PlayerIntent>().has_action()
         {
             player_schedule.run(&mut world);
-            if world.resource::<TurnState>().consumed {
-                simulation_schedule.run(&mut world);
-            }
         }
 
         // Rendering is deliberately a plain Macroquad function that manually
@@ -70,7 +61,7 @@ fn init_world(world: &mut World) {
     world.insert_resource(InputRepeat::default());
     world.insert_resource(KeyBindings::default());
     world.insert_resource(PauseMenuState::default());
-    world.insert_resource(TurnState::default());
+    world.insert_resource(EnergyTimeline::default());
     world.insert_resource(Camera::default());
     world.insert_resource(SimulationClock {
         turn: 0,
@@ -90,6 +81,7 @@ fn init_world(world: &mut World) {
             max: 35.0,
         },
         MovementState::default(),
+        ActionEnergy::default(),
     ));
 
     for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {
@@ -105,7 +97,7 @@ fn init_world(world: &mut World) {
                 phase: JobPhase::FindParcel,
                 parcel: None,
             },
-            StepCooldown::default(),
+            ActionEnergy::default(),
         ));
     }
 

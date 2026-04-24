@@ -4,7 +4,8 @@ use macroquad::prelude::*;
 use crate::components::*;
 use crate::map::Map;
 use crate::resources::{
-    Camera, GameScreen, PauseMenuEntry, PauseMenuState, SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
+    Camera, EnergyTimeline, GameScreen, PauseMenuEntry, PauseMenuState, SimulationClock,
+    DEFAULT_CAMERA_TILE_SPAN,
 };
 
 pub const TILE_SIZE: f32 = 16.0;
@@ -17,7 +18,7 @@ const CONTROL_HINTS: [&str; 8] = [
     "E: pick up loose cargo here",
     "Shift: toggle walking / sprinting",
     "Esc: pause / resume",
-    "Turns advance only on valid action",
+    "Energy advances only on valid action",
     "Water blocks movement",
     "Sprint spends stamina for speed",
 ];
@@ -255,9 +256,10 @@ fn draw_ui(world: &mut World, camera: Camera) {
     );
 
     let clock = *world.resource::<SimulationClock>();
-    let mut player_query =
-        world.query_filtered::<(&Position, &Stamina, &Cargo, &MovementState), With<Player>>();
-    let (player_position, stamina, cargo, movement_state) = player_query
+    let timeline = *world.resource::<EnergyTimeline>();
+    let mut player_query = world
+        .query_filtered::<(&Position, &Stamina, &Cargo, &MovementState, &ActionEnergy), With<Player>>();
+    let (player_position, stamina, cargo, movement_state, player_energy) = player_query
         .iter(world)
         .next()
         .expect("player exists for UI");
@@ -269,6 +271,7 @@ fn draw_ui(world: &mut World, camera: Camera) {
     y += 38.0;
 
     ui_line(ui_x, &mut y, &format!("Turn: {}", clock.turn));
+    ui_line(ui_x, &mut y, &format!("Energy time: {}", timeline.now));
     ui_line(
         ui_x,
         &mut y,
@@ -291,6 +294,11 @@ fn draw_ui(world: &mut World, camera: Camera) {
         ui_x,
         &mut y,
         &format!("Movement: {}", movement_state.mode.label()),
+    );
+    ui_line(
+        ui_x,
+        &mut y,
+        &format!("Ready: {}", ready_label(*player_energy, timeline.now)),
     );
     ui_line(
         ui_x,
@@ -397,11 +405,12 @@ fn draw_menu_entry(x: f32, y: f32, label: &str, selected: bool) {
 }
 
 fn draw_agent_debug(world: &mut World, ui_x: f32, y: &mut f32) {
-    let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob, &StepCooldown)>();
+    let timeline = world.resource::<EnergyTimeline>().now;
+    let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob, &ActionEnergy)>();
     let mut rows = query.iter(world).collect::<Vec<_>>();
     rows.sort_by_key(|(_, agent, _, _, _)| agent.id);
 
-    for (position, agent, cargo, job, cooldown) in rows {
+    for (position, agent, cargo, job, energy) in rows {
         let phase = match job.phase {
             JobPhase::FindParcel => "finding",
             JobPhase::GoToParcel => "to parcel",
@@ -412,10 +421,23 @@ fn draw_agent_debug(world: &mut World, ui_x: f32, y: &mut f32) {
             ui_x,
             y,
             &format!(
-                "P{}: {},{} | {} | load {:.0} | cd {}",
-                agent.id, position.x, position.y, phase, cargo.current_weight, cooldown.frames
+                "P{}: {},{} | {} | load {:.0} | {}",
+                agent.id,
+                position.x,
+                position.y,
+                phase,
+                cargo.current_weight,
+                ready_label(*energy, timeline)
             ),
         );
+    }
+}
+
+fn ready_label(energy: ActionEnergy, now: u64) -> String {
+    if energy.is_ready(now) {
+        "ready".to_owned()
+    } else {
+        format!("ready in {}", energy.ready_at - now)
     }
 }
 
