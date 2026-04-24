@@ -4,6 +4,15 @@ use crate::components::*;
 use crate::map::Map;
 use crate::resources::{InputState, SimulationClock};
 
+type AgentJobItem<'a> = (
+    Entity,
+    &'a mut Position,
+    &'a mut Velocity,
+    &'a mut Cargo,
+    &'a mut AssignedJob,
+    &'a mut StepCooldown,
+);
+
 pub fn tick_clock(mut clock: ResMut<SimulationClock>) {
     clock.turn += 1;
 }
@@ -81,17 +90,7 @@ pub fn assign_agent_jobs(
 pub fn agent_jobs(
     map: Res<Map>,
     mut clock: ResMut<SimulationClock>,
-    mut agents: Query<
-        (
-            Entity,
-            &mut Position,
-            &mut Velocity,
-            &mut Cargo,
-            &mut AssignedJob,
-            &mut StepCooldown,
-        ),
-        With<Agent>,
-    >,
+    mut agents: Query<AgentJobItem, With<Agent>>,
     mut parcels: Query<(&Position, &CargoParcel, &mut ParcelState), Without<Agent>>,
 ) {
     let map = &*map;
@@ -130,10 +129,10 @@ pub fn agent_jobs(
                     continue;
                 }
 
-                let moved = greedy_step(&map, &mut position, parcel_position.x, parcel_position.y);
+                let moved = greedy_step(map, &mut position, parcel_position.x, parcel_position.y);
                 velocity.dx = moved.0;
                 velocity.dy = moved.1;
-                cooldown.frames = step_delay(&map, position.x, position.y);
+                cooldown.frames = step_delay(map, position.x, position.y);
             }
             JobPhase::GoToDepot => {
                 if position.x == map.depot.0 && position.y == map.depot.1 {
@@ -146,10 +145,10 @@ pub fn agent_jobs(
                     continue;
                 }
 
-                let moved = greedy_step(&map, &mut position, map.depot.0, map.depot.1);
+                let moved = greedy_step(map, &mut position, map.depot.0, map.depot.1);
                 velocity.dx = moved.0;
                 velocity.dy = moved.1;
-                cooldown.frames = step_delay(&map, position.x, position.y);
+                cooldown.frames = step_delay(map, position.x, position.y);
             }
         }
     }

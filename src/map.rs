@@ -133,6 +133,6 @@ impl Map {
 }
 
 fn deterministic_noise(x: i32, y: i32) -> i32 {
-    let n = x * 73_856_093 ^ y * 19_349_663 ^ 0x5bd1e995u32 as i32;
-    (n.abs() % 100) as i32
+    let n = (x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663) ^ 0x5bd1_e995;
+    (n % 100) as i32
 }

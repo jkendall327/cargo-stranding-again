@@ -6,3 +6,10 @@ edition = "2021"
 [dependencies]
 bevy_ecs = "0.14"
 macroquad = "0.4"
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "deny"
