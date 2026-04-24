@@ -3,7 +3,9 @@ use macroquad::prelude::*;
 
 use crate::components::*;
 use crate::map::Map;
-use crate::resources::{Camera, SimulationClock, DEFAULT_CAMERA_TILE_SPAN};
+use crate::resources::{
+    Camera, GameScreen, PauseMenuEntry, PauseMenuState, SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
+};
 
 pub const TILE_SIZE: f32 = 16.0;
 const VIEWPORT_X: f32 = 24.0;
@@ -43,6 +45,7 @@ pub fn render(world: &mut World) {
     draw_player(world, camera);
     draw_viewport_frame(camera);
     draw_ui(world, camera);
+    draw_game_state_overlay(world);
 }
 
 fn update_camera(world: &mut World) {
@@ -283,6 +286,7 @@ fn draw_ui(world: &mut World, camera: Camera) {
     y += 28.0;
     ui_line(ui_x, &mut y, "WASD / Arrows: move one tile");
     ui_line(ui_x, &mut y, "Space / .: wait and recover stamina");
+    ui_line(ui_x, &mut y, "Esc: pause / resume");
     ui_line(ui_x, &mut y, "Turns advance only on valid action");
     ui_line(ui_x, &mut y, "Water blocks movement");
     ui_line(ui_x, &mut y, "Grass is stamina-neutral");
@@ -296,6 +300,83 @@ fn draw_ui(world: &mut World, camera: Camera) {
     ui_line(ui_x, &mut y, "Green/Gold circles: porters");
     ui_line(ui_x, &mut y, "Orange boxes: loose cargo");
     ui_line(ui_x, &mut y, "D: depot");
+}
+
+fn draw_game_state_overlay(world: &World) {
+    match *world.resource::<GameScreen>() {
+        GameScreen::Playing => {}
+        GameScreen::PauseMenu => draw_pause_menu(world.resource::<PauseMenuState>()),
+        GameScreen::OptionsMenu => draw_options_menu(),
+    }
+}
+
+fn draw_pause_menu(menu: &PauseMenuState) {
+    draw_modal_panel(380.0, 250.0);
+
+    let panel_x = (screen_width() - 380.0) / 2.0;
+    let mut y = (screen_height() - 250.0) / 2.0 + 58.0;
+    draw_text("Paused", panel_x + 42.0, y, 34.0, WHITE);
+    y += 50.0;
+
+    for entry in PauseMenuEntry::ALL {
+        draw_menu_entry(panel_x + 42.0, y, entry.label(), menu.selected() == entry);
+        y += 44.0;
+    }
+}
+
+fn draw_options_menu() {
+    draw_modal_panel(420.0, 250.0);
+
+    let panel_x = (screen_width() - 420.0) / 2.0;
+    let mut y = (screen_height() - 250.0) / 2.0 + 58.0;
+    draw_text("Options", panel_x + 42.0, y, 34.0, WHITE);
+    y += 52.0;
+    draw_text(
+        "No options yet.",
+        panel_x + 42.0,
+        y,
+        22.0,
+        Color::from_rgba(210, 216, 222, 255),
+    );
+}
+
+fn draw_modal_panel(width: f32, height: f32) {
+    draw_rectangle(
+        0.0,
+        0.0,
+        screen_width(),
+        screen_height(),
+        Color::from_rgba(0, 0, 0, 145),
+    );
+
+    let panel_x = (screen_width() - width) / 2.0;
+    let panel_y = (screen_height() - height) / 2.0;
+    draw_rectangle(
+        panel_x,
+        panel_y,
+        width,
+        height,
+        Color::from_rgba(30, 35, 41, 245),
+    );
+    draw_rectangle_lines(
+        panel_x,
+        panel_y,
+        width,
+        height,
+        2.0,
+        Color::from_rgba(220, 226, 232, 180),
+    );
+}
+
+fn draw_menu_entry(x: f32, y: f32, label: &str, selected: bool) {
+    let color = if selected {
+        Color::from_rgba(252, 204, 84, 255)
+    } else {
+        Color::from_rgba(220, 225, 230, 255)
+    };
+    let marker = if selected { ">" } else { " " };
+    draw_text(marker, x, y, 26.0, color);
+    draw_text(label, x + 34.0, y, 26.0, color);
 }
 
 fn draw_agent_debug(world: &mut World, ui_x: f32, y: &mut f32) {

@@ -6,6 +6,20 @@ pub const DEFAULT_CAMERA_TILE_SPAN: i32 = 31;
 pub const INPUT_REPEAT_INITIAL_DELAY: f64 = 0.18;
 pub const INPUT_REPEAT_INTERVAL: f64 = 0.08;
 
+#[derive(Resource, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameScreen {
+    #[default]
+    Playing,
+    PauseMenu,
+    OptionsMenu,
+}
+
+impl GameScreen {
+    pub fn allows_simulation(self) -> bool {
+        matches!(self, Self::Playing)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputAction {
     MoveLeft,
@@ -42,6 +56,56 @@ impl InputAction {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MenuAction {
+    MoveSelectionUp,
+    MoveSelectionDown,
+    Confirm,
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PauseMenuEntry {
+    Resume,
+    Options,
+}
+
+impl PauseMenuEntry {
+    pub const ALL: [Self; 2] = [Self::Resume, Self::Options];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Resume => "Resume",
+            Self::Options => "Options",
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct PauseMenuState {
+    selected_index: usize,
+}
+
+impl PauseMenuState {
+    pub fn selected(self) -> PauseMenuEntry {
+        PauseMenuEntry::ALL[self.selected_index]
+    }
+
+    pub fn select_next(&mut self) {
+        self.selected_index = (self.selected_index + 1) % PauseMenuEntry::ALL.len();
+    }
+
+    pub fn select_previous(&mut self) {
+        self.selected_index =
+            (self.selected_index + PauseMenuEntry::ALL.len() - 1) % PauseMenuEntry::ALL.len();
+    }
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct MenuInputState {
+    pub action: Option<MenuAction>,
+}
+
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct InputRepeat {
     held_action: Option<InputAction>,
@@ -49,6 +113,10 @@ pub struct InputRepeat {
 }
 
 impl InputRepeat {
+    pub fn reset(&mut self) {
+        self.held_action = None;
+    }
+
     pub fn action_for_frame(
         &mut self,
         held_action: Option<InputAction>,

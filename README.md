@@ -17,6 +17,8 @@ cargo run
 
 - Move with `WASD` or arrow keys.
 - Wait with `Space` or `.`.
+- Pause and resume with `Esc`.
+- In the pause menu, use `WASD`/arrow keys to choose `Resume` or `Options`, then `Enter`/`Space` to confirm.
 - Water and map bounds block movement.
 - Grass is stamina-neutral.
 - Mud and rock drain stamina, with cargo making that drain worse.

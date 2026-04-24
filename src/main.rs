@@ -10,7 +10,10 @@ use macroquad::prelude::*;
 use components::*;
 use map::Map;
 use render::window_conf;
-use resources::{Camera, InputAction, InputRepeat, InputState, SimulationClock, TurnState};
+use resources::{
+    Camera, GameScreen, InputAction, InputRepeat, InputState, MenuAction, MenuInputState,
+    PauseMenuState, SimulationClock, TurnState,
+};
 
 #[macroquad::main(window_conf)]
 async fn main() {
@@ -19,6 +22,9 @@ async fn main() {
 
     let mut player_schedule = Schedule::default();
     player_schedule.add_systems(systems::player_movement);
+
+    let mut menu_schedule = Schedule::default();
+    menu_schedule.add_systems(systems::menu_navigation);
 
     let mut simulation_schedule = Schedule::default();
     simulation_schedule.add_systems((
@@ -32,11 +38,14 @@ async fn main() {
         // Macroquad owns the outer async frame loop and immediate-mode input.
         // Each frame we copy only the compact input intent into an ECS resource.
         copy_input_to_ecs(&mut world);
+        menu_schedule.run(&mut world);
 
         // Bevy ECS owns simulation state, but the sim is turn-based: first the
         // player action is resolved, then NPC jobs and the clock advance only
         // if that action actually consumed a turn.
-        if world.resource::<InputState>().has_action() {
+        if world.resource::<GameScreen>().allows_simulation()
+            && world.resource::<InputState>().has_action()
+        {
             player_schedule.run(&mut world);
             if world.resource::<TurnState>().consumed {
                 simulation_schedule.run(&mut world);
@@ -52,8 +61,11 @@ async fn main() {
 
 fn init_world(world: &mut World) {
     world.insert_resource(Map::generate());
+    world.insert_resource(GameScreen::default());
     world.insert_resource(InputState::default());
+    world.insert_resource(MenuInputState::default());
     world.insert_resource(InputRepeat::default());
+    world.insert_resource(PauseMenuState::default());
     world.insert_resource(TurnState::default());
     world.insert_resource(Camera::default());
     world.insert_resource(SimulationClock {
@@ -108,16 +120,49 @@ fn init_world(world: &mut World) {
 }
 
 fn copy_input_to_ecs(world: &mut World) {
-    let held_action = current_held_action();
-    let newly_pressed_action = current_pressed_action();
-    let action = world.resource_mut::<InputRepeat>().action_for_frame(
-        held_action,
-        newly_pressed_action,
-        get_time(),
-    );
+    let game_screen = *world.resource::<GameScreen>();
+    let menu_action = current_menu_action(game_screen);
+    *world.resource_mut::<MenuInputState>() = MenuInputState {
+        action: menu_action,
+    };
 
-    *world.resource_mut::<InputState>() =
-        action.map(InputAction::to_input_state).unwrap_or_default();
+    if game_screen.allows_simulation() && menu_action.is_none() {
+        let held_action = current_held_action();
+        let newly_pressed_action = current_pressed_action();
+        let action = world.resource_mut::<InputRepeat>().action_for_frame(
+            held_action,
+            newly_pressed_action,
+            get_time(),
+        );
+
+        *world.resource_mut::<InputState>() =
+            action.map(InputAction::to_input_state).unwrap_or_default();
+    } else {
+        world.resource_mut::<InputRepeat>().reset();
+        *world.resource_mut::<InputState>() = InputState::default();
+    }
+}
+
+fn current_menu_action(game_screen: GameScreen) -> Option<MenuAction> {
+    if is_key_pressed(KeyCode::Escape) {
+        Some(MenuAction::Cancel)
+    } else {
+        match game_screen {
+            GameScreen::Playing => None,
+            GameScreen::PauseMenu => {
+                if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
+                    Some(MenuAction::MoveSelectionUp)
+                } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
+                    Some(MenuAction::MoveSelectionDown)
+                } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
+                    Some(MenuAction::Confirm)
+                } else {
+                    None
+                }
+            }
+            GameScreen::OptionsMenu => None,
+        }
+    }
 }
 
 fn current_held_action() -> Option<InputAction> {
