@@ -10,18 +10,20 @@ use macroquad::prelude::*;
 use components::*;
 use map::Map;
 use render::window_conf;
-use resources::{InputState, SimulationClock};
+use resources::{InputState, SimulationClock, TurnState};
 
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut world = World::new();
     init_world(&mut world);
 
-    let mut schedule = Schedule::default();
-    schedule.add_systems((
+    let mut player_schedule = Schedule::default();
+    player_schedule.add_systems(systems::player_movement);
+
+    let mut simulation_schedule = Schedule::default();
+    simulation_schedule.add_systems((
         systems::tick_clock,
         systems::tick_cooldowns,
-        systems::player_movement,
         systems::assign_agent_jobs,
         systems::agent_jobs,
     ));
@@ -31,9 +33,15 @@ async fn main() {
         // Each frame we copy only the compact input intent into an ECS resource.
         copy_input_to_ecs(&mut world);
 
-        // Bevy ECS owns simulation state. Running this schedule advances stamina,
-        // jobs, porter movement, parcel pickup/dropoff, and the simulation clock.
-        schedule.run(&mut world);
+        // Bevy ECS owns simulation state, but the sim is turn-based: first the
+        // player action is resolved, then NPC jobs and the clock advance only
+        // if that action actually consumed a turn.
+        if world.resource::<InputState>().has_action() {
+            player_schedule.run(&mut world);
+            if world.resource::<TurnState>().consumed {
+                simulation_schedule.run(&mut world);
+            }
+        }
 
         // Rendering is deliberately a plain Macroquad function that manually
         // queries ECS state. This keeps drawing separate from deterministic sim.
@@ -45,6 +53,7 @@ async fn main() {
 fn init_world(world: &mut World) {
     world.insert_resource(Map::generate());
     world.insert_resource(InputState::default());
+    world.insert_resource(TurnState::default());
     world.insert_resource(SimulationClock {
         turn: 0,
         delivered_parcels: 0,
@@ -108,5 +117,7 @@ fn copy_input_to_ecs(world: &mut World) {
         input.move_y = -1;
     } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
         input.move_y = 1;
+    } else if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Period) {
+        input.wait = true;
     }
 }

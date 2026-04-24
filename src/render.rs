@@ -210,7 +210,8 @@ fn draw_ui(world: &mut World) {
     draw_text("Controls", UI_X, y, 22.0, WHITE);
     y += 28.0;
     ui_line(&mut y, "WASD / Arrows: move one tile");
-    ui_line(&mut y, "Wait: recover stamina");
+    ui_line(&mut y, "Space / .: wait and recover stamina");
+    ui_line(&mut y, "Turns advance only on valid action");
     ui_line(&mut y, "Water blocks movement");
     ui_line(&mut y, "Mud/Rock cost more stamina");
     ui_line(&mut y, "Roads are cheap traversal");

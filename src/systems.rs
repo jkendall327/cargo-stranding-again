@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::components::*;
 use crate::map::Map;
-use crate::resources::{InputState, SimulationClock};
+use crate::resources::{InputState, SimulationClock, TurnState};
 
 type AgentJobItem<'a> = (
     Entity,
@@ -26,8 +26,11 @@ pub fn tick_cooldowns(mut query: Query<&mut StepCooldown>) {
 pub fn player_movement(
     input: Res<InputState>,
     map: Res<Map>,
+    mut turn: ResMut<TurnState>,
     mut query: Query<(&mut Position, &mut Velocity, &mut Stamina, &Cargo), With<Player>>,
 ) {
+    turn.consumed = false;
+
     let map = &*map;
     let Ok((mut position, mut velocity, mut stamina, cargo)) = query.get_single_mut() else {
         return;
@@ -36,8 +39,9 @@ pub fn player_movement(
     velocity.dx = 0;
     velocity.dy = 0;
 
-    if input.move_x == 0 && input.move_y == 0 {
+    if input.wait {
         stamina.current = (stamina.current + 0.35).min(stamina.max);
+        turn.consumed = true;
         return;
     }
 
@@ -62,6 +66,7 @@ pub fn player_movement(
     velocity.dx = input.move_x;
     velocity.dy = input.move_y;
     stamina.current -= stamina_cost;
+    turn.consumed = true;
 }
 
 pub fn assign_agent_jobs(
@@ -209,6 +214,76 @@ mod tests {
 
     fn spawn_test_parcel(world: &mut World, position: Position) {
         world.spawn((position, CargoParcel { weight: 5.0 }, ParcelState::Loose));
+    }
+
+    fn spawn_test_player(world: &mut World, position: Position, stamina: f32) {
+        world.spawn((
+            Player,
+            position,
+            Velocity::default(),
+            Cargo {
+                current_weight: 0.0,
+                max_weight: 40.0,
+            },
+            Stamina {
+                current: stamina,
+                max: 35.0,
+            },
+        ));
+    }
+
+    #[test]
+    fn failed_player_movement_does_not_consume_turn() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        world.insert_resource(InputState {
+            move_x: -1,
+            move_y: 0,
+            wait: false,
+        });
+        world.insert_resource(TurnState { consumed: true });
+        spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_movement);
+        schedule.run(&mut world);
+
+        let turn = world.resource::<TurnState>();
+        assert!(!turn.consumed);
+
+        let mut player_query = world.query_filtered::<&Position, With<Player>>();
+        let position = player_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(*position, Position { x: 0, y: 0 });
+    }
+
+    #[test]
+    fn wait_consumes_turn_and_recovers_stamina() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        world.insert_resource(InputState {
+            move_x: 0,
+            move_y: 0,
+            wait: true,
+        });
+        world.insert_resource(TurnState::default());
+        spawn_test_player(&mut world, Position { x: 0, y: 0 }, 10.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_movement);
+        schedule.run(&mut world);
+
+        let turn = world.resource::<TurnState>();
+        assert!(turn.consumed);
+
+        let mut player_query = world.query_filtered::<&Stamina, With<Player>>();
+        let stamina = player_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert!(stamina.current > 10.0);
     }
 
     #[test]
