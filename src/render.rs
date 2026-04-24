@@ -14,12 +14,12 @@ const UI_GAP: f32 = 28.0;
 const CONTROL_HINTS: [&str; 8] = [
     "WASD / Arrows: move one tile",
     "Space / .: wait and recover stamina",
+    "E: pick up loose cargo here",
+    "Shift: toggle walking / sprinting",
     "Esc: pause / resume",
     "Turns advance only on valid action",
     "Water blocks movement",
-    "Grass is stamina-neutral",
-    "Mud/Rock drain stamina",
-    "Roads/Depot restore stamina",
+    "Sprint spends stamina for speed",
 ];
 const LEGEND_LINES: [&str; 4] = [
     "@ player",
@@ -189,8 +189,9 @@ fn draw_agents(world: &mut World, camera: Camera) {
 }
 
 fn draw_player(world: &mut World, camera: Camera) {
-    let mut query = world.query_filtered::<(&Position, &Stamina, &Cargo), With<Player>>();
-    let Some((position, stamina, cargo)) = query.iter(world).next() else {
+    let mut query =
+        world.query_filtered::<(&Position, &Stamina, &Cargo, &MovementState), With<Player>>();
+    let Some((position, stamina, cargo, movement_state)) = query.iter(world).next() else {
         return;
     };
     if !camera.contains(*position) {
@@ -198,12 +199,16 @@ fn draw_player(world: &mut World, camera: Camera) {
     }
 
     let (px, py) = tile_to_screen(camera, position.x, position.y);
+    let player_color = match movement_state.mode {
+        crate::movement::MovementMode::Walking => Color::from_rgba(235, 235, 246, 255),
+        crate::movement::MovementMode::Sprinting => Color::from_rgba(250, 218, 108, 255),
+    };
     draw_rectangle(
         px + 2.0,
         py + 2.0,
         TILE_SIZE - 4.0,
         TILE_SIZE - 4.0,
-        Color::from_rgba(235, 235, 246, 255),
+        player_color,
     );
     draw_text(
         "@",
@@ -250,8 +255,9 @@ fn draw_ui(world: &mut World, camera: Camera) {
     );
 
     let clock = *world.resource::<SimulationClock>();
-    let mut player_query = world.query_filtered::<(&Position, &Stamina, &Cargo), With<Player>>();
-    let (player_position, stamina, cargo) = player_query
+    let mut player_query =
+        world.query_filtered::<(&Position, &Stamina, &Cargo, &MovementState), With<Player>>();
+    let (player_position, stamina, cargo, movement_state) = player_query
         .iter(world)
         .next()
         .expect("player exists for UI");
@@ -280,6 +286,11 @@ fn draw_ui(world: &mut World, camera: Camera) {
         ui_x,
         &mut y,
         &format!("Stamina: {:.1}/{:.1}", stamina.current, stamina.max),
+    );
+    ui_line(
+        ui_x,
+        &mut y,
+        &format!("Movement: {}", movement_state.mode.label()),
     );
     ui_line(
         ui_x,

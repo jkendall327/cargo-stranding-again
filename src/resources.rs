@@ -42,7 +42,15 @@ impl Direction {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlayerAction {
     Move(Direction),
+    PickUp,
+    ToggleSprint,
     Wait,
+}
+
+impl PlayerAction {
+    pub fn repeats_while_held(self) -> bool {
+        matches!(self, Self::Move(_) | Self::Wait)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -112,15 +120,25 @@ impl InputRepeat {
         newly_pressed_action: Option<PlayerAction>,
         now: f64,
     ) -> Option<PlayerAction> {
+        if let Some(action) = newly_pressed_action {
+            self.held_action = Some(action);
+            self.next_repeat_at = now + INPUT_REPEAT_INITIAL_DELAY;
+            return Some(action);
+        }
+
         let Some(action) = held_action else {
             self.held_action = None;
             return None;
         };
 
-        if newly_pressed_action == Some(action) || self.held_action != Some(action) {
+        if self.held_action != Some(action) {
             self.held_action = Some(action);
             self.next_repeat_at = now + INPUT_REPEAT_INITIAL_DELAY;
             return Some(action);
+        }
+
+        if !action.repeats_while_held() {
+            return None;
         }
 
         if now >= self.next_repeat_at {
@@ -279,6 +297,24 @@ mod tests {
         assert_eq!(
             repeat.action_for_frame(Some(PlayerAction::Wait), Some(PlayerAction::Wait), 0.06),
             Some(PlayerAction::Wait)
+        );
+    }
+
+    #[test]
+    fn non_repeatable_actions_do_not_repeat_while_held() {
+        let mut repeat = InputRepeat::default();
+
+        assert_eq!(
+            repeat.action_for_frame(
+                Some(PlayerAction::ToggleSprint),
+                Some(PlayerAction::ToggleSprint),
+                0.0
+            ),
+            Some(PlayerAction::ToggleSprint)
+        );
+        assert_eq!(
+            repeat.action_for_frame(Some(PlayerAction::ToggleSprint), None, 1.0),
+            None
         );
     }
 }

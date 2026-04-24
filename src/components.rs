@@ -1,5 +1,7 @@
 use bevy_ecs::prelude::*;
 
+use crate::movement::MovementMode;
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
     pub x: i32,
@@ -30,6 +32,28 @@ pub struct Cargo {
 pub struct Stamina {
     pub current: f32,
     pub max: f32,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MovementState {
+    pub mode: MovementMode,
+}
+
+impl Default for MovementState {
+    fn default() -> Self {
+        Self {
+            mode: MovementMode::Walking,
+        }
+    }
+}
+
+impl MovementState {
+    pub fn toggle_sprint(&mut self) {
+        self.mode = match self.mode {
+            MovementMode::Walking => MovementMode::Sprinting,
+            MovementMode::Sprinting => MovementMode::Walking,
+        };
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug)]

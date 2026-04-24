@@ -7,6 +7,16 @@ use crate::resources::Direction;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MovementMode {
     Walking,
+    Sprinting,
+}
+
+impl MovementMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Walking => "walking",
+            Self::Sprinting => "sprinting",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -71,11 +81,15 @@ impl MovementOutcome {
 
 impl MovementRequest {
     pub fn walking(origin: Position, direction: Direction) -> Self {
+        Self::new(origin, direction, MovementMode::Walking)
+    }
+
+    pub fn new(origin: Position, direction: Direction, mode: MovementMode) -> Self {
         Self {
             entity: None,
             origin,
             direction,
-            mode: MovementMode::Walking,
+            mode,
             stamina: None,
             cargo: CargoLoad::default(),
         }
@@ -109,7 +123,7 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
         return MovementOutcome::Blocked(result);
     }
 
-    result.stamina_delta = stamina_delta_for(terrain, request.cargo);
+    result.stamina_delta = stamina_delta_for(terrain, request.mode, request.cargo);
     if let Some(stamina) = request.stamina {
         let available_stamina = stamina.current.clamp(0.0, stamina.max);
         if result.stamina_delta.is_sign_negative() && available_stamina < result.stamina_delta.abs()
@@ -120,7 +134,7 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
 
     result.actual_delta = requested_delta;
     result.turn_cost = 1;
-    result.cooldown_cost = terrain_cooldown_cost(terrain);
+    result.cooldown_cost = movement_cooldown_cost(terrain, request.mode);
     MovementOutcome::Moved(result)
 }
 
@@ -128,12 +142,32 @@ pub fn terrain_cooldown_cost(terrain: Terrain) -> u32 {
     (6.0 + terrain.movement_cost() * 5.0) as u32
 }
 
-fn stamina_delta_for(terrain: Terrain, cargo: CargoLoad) -> f32 {
+fn movement_cooldown_cost(terrain: Terrain, mode: MovementMode) -> u32 {
+    let terrain_cost = terrain_cooldown_cost(terrain);
+    match mode {
+        MovementMode::Walking => terrain_cost,
+        MovementMode::Sprinting => ((terrain_cost as f32) * 0.65).max(1.0) as u32,
+    }
+}
+
+fn stamina_delta_for(terrain: Terrain, mode: MovementMode, cargo: CargoLoad) -> f32 {
     let terrain_delta = terrain.stamina_delta();
-    if terrain_delta.is_sign_negative() {
-        terrain_delta * cargo_load_factor(cargo)
-    } else {
-        terrain_delta
+    match mode {
+        MovementMode::Walking => {
+            if terrain_delta.is_sign_negative() {
+                terrain_delta * cargo_load_factor(cargo)
+            } else {
+                terrain_delta
+            }
+        }
+        MovementMode::Sprinting => {
+            let movement_cost = if terrain_delta.is_sign_negative() {
+                terrain_delta
+            } else {
+                -1.0
+            };
+            movement_cost * 2.0 * cargo_load_factor(cargo)
+        }
     }
 }
 
@@ -266,6 +300,30 @@ mod tests {
         .expect("mud should be passable");
 
         assert!(loaded.stamina_delta < unloaded.stamina_delta);
+    }
+
+    #[test]
+    fn sprinting_costs_stamina_and_reduces_cooldown() {
+        let map = Map::generate();
+        let (start, direction) = find_target_terrain(&map, Terrain::Grass);
+
+        let walking = resolve_movement(&map, request_from(start, direction))
+            .moved()
+            .expect("grass should be passable");
+
+        let sprinting = resolve_movement(
+            &map,
+            MovementRequest {
+                mode: MovementMode::Sprinting,
+                ..request_from(start, direction)
+            },
+        )
+        .moved()
+        .expect("grass should be passable");
+
+        assert_eq!(walking.stamina_delta, 0.0);
+        assert!(sprinting.stamina_delta < walking.stamina_delta);
+        assert!(sprinting.cooldown_cost < walking.cooldown_cost);
     }
 
     #[test]

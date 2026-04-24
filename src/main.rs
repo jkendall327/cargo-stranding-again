@@ -24,7 +24,7 @@ async fn main() {
     init_world(&mut world);
 
     let mut player_schedule = Schedule::default();
-    player_schedule.add_systems(systems::player_movement);
+    player_schedule.add_systems(systems::player_actions);
 
     let mut menu_schedule = Schedule::default();
     menu_schedule.add_systems(systems::menu_navigation);
@@ -89,6 +89,7 @@ fn init_world(world: &mut World) {
             current: 35.0,
             max: 35.0,
         },
+        MovementState::default(),
     ));
 
     for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {

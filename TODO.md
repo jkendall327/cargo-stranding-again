@@ -82,15 +82,15 @@ Goal: grow `PlayerAction` deliberately without turning it into input-shaped move
 
 - [ ] Add action variants only as systems exist to consume them.
 - [ ] Candidate variants:
-  - [ ] `Sprint(Direction)`
+  - [x] Persistent sprint posture via `ToggleSprint` + `Move(Direction)`
   - [ ] `Crawl(Direction)`
-  - [ ] `PickUp`
+  - [x] `PickUp`
   - [ ] `Drop`
   - [ ] `Interact`
   - [ ] `OpenInventory`
   - [ ] `AdjustBalance(BalanceShift)`
-- [ ] Decide whether movement modes are selected by action (`Sprint(North)`) or by a persistent component (`MovementMode::Sprinting` plus `Move(North)`).
-- [ ] Add a player movement-state component when the first non-walking mode needs persistence.
+- [x] Decide whether movement modes are selected by action (`Sprint(North)`) or by a persistent component (`MovementMode::Sprinting` plus `Move(North)`).
+- [x] Add a player movement-state component when the first non-walking mode needs persistence.
 - [ ] Keep menu actions separate from gameplay actions.
 - [ ] Keep contextual actions resolved after input, not inside keybinding lookup.
 
@@ -110,6 +110,7 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
   - [ ] `ContainedIn { container: Entity }`
 - [ ] Rework `CargoParcel` / `ParcelState` to use the new item relationship model.
 - [ ] Add pickup/drop systems.
+  - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
   - [ ] Pick up a loose item at the actor position.
   - [ ] Fail clearly if the slot is occupied.
   - [ ] Fail clearly if weight/volume capacity is exceeded.

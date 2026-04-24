@@ -65,16 +65,28 @@ pub fn menu_navigation(
     }
 }
 
-pub fn player_movement(
+pub fn player_actions(
     intent: Res<PlayerIntent>,
     map: Res<Map>,
     mut turn: ResMut<TurnState>,
-    mut query: Query<(Entity, &mut Position, &mut Velocity, &mut Stamina, &Cargo), With<Player>>,
+    mut player_query: Query<
+        (
+            Entity,
+            &mut Position,
+            &mut Velocity,
+            &mut Stamina,
+            &mut Cargo,
+            &mut MovementState,
+        ),
+        With<Player>,
+    >,
+    mut parcels: Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
 ) {
     turn.consumed = false;
 
     let map = &*map;
-    let Ok((entity, mut position, mut velocity, mut stamina, cargo)) = query.get_single_mut()
+    let Ok((entity, mut position, mut velocity, mut stamina, mut cargo, mut movement_state)) =
+        player_query.get_single_mut()
     else {
         return;
     };
@@ -92,30 +104,63 @@ pub fn player_movement(
         return;
     }
 
-    let PlayerAction::Move(direction) = action else {
-        return;
-    };
-    let mut request = MovementRequest::walking(*position, direction);
-    request.entity = Some(entity);
-    request.stamina = Some(StaminaBudget {
-        current: stamina.current,
-        max: stamina.max,
-    });
-    request.cargo = CargoLoad {
-        current_weight: cargo.current_weight,
-        max_weight: cargo.max_weight,
-    };
+    match action {
+        PlayerAction::Move(direction) => {
+            let mut request = MovementRequest::new(*position, direction, movement_state.mode);
+            request.entity = Some(entity);
+            request.stamina = Some(StaminaBudget {
+                current: stamina.current,
+                max: stamina.max,
+            });
+            request.cargo = CargoLoad {
+                current_weight: cargo.current_weight,
+                max_weight: cargo.max_weight,
+            };
 
-    let outcome = resolve_movement(map, request);
-    let result = outcome.result();
-    if matches!(outcome, MovementOutcome::Moved(_)) {
-        position.x = result.target.x;
-        position.y = result.target.y;
-        velocity.dx = result.actual_delta.0;
-        velocity.dy = result.actual_delta.1;
-        stamina.current = (stamina.current + result.stamina_delta).clamp(0.0, stamina.max);
-        turn.consumed = result.turn_cost > 0;
+            let outcome = resolve_movement(map, request);
+            let result = outcome.result();
+            if matches!(outcome, MovementOutcome::Moved(_)) {
+                position.x = result.target.x;
+                position.y = result.target.y;
+                velocity.dx = result.actual_delta.0;
+                velocity.dy = result.actual_delta.1;
+                stamina.current = (stamina.current + result.stamina_delta).clamp(0.0, stamina.max);
+                turn.consumed = result.turn_cost > 0;
+            }
+        }
+        PlayerAction::PickUp => {
+            if pick_up_loose_parcel(entity, *position, &mut cargo, &mut parcels) {
+                turn.consumed = true;
+            }
+        }
+        PlayerAction::ToggleSprint => {
+            movement_state.toggle_sprint();
+        }
+        PlayerAction::Wait => {}
     }
+}
+
+fn pick_up_loose_parcel(
+    holder: Entity,
+    holder_position: Position,
+    cargo: &mut Cargo,
+    parcels: &mut Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
+) -> bool {
+    for (_parcel_entity, parcel_position, parcel, mut parcel_state) in parcels.iter_mut() {
+        if *parcel_state != ParcelState::Loose || *parcel_position != holder_position {
+            continue;
+        }
+
+        if cargo.current_weight + parcel.weight > cargo.max_weight {
+            return false;
+        }
+
+        *parcel_state = ParcelState::CarriedBy(holder);
+        cargo.current_weight += parcel.weight;
+        return true;
+    }
+
+    false
 }
 
 pub fn assign_agent_jobs(
@@ -337,6 +382,7 @@ mod tests {
                 current: stamina,
                 max: 35.0,
             },
+            MovementState::default(),
         ));
     }
 
@@ -384,7 +430,7 @@ mod tests {
         spawn_test_player(world, start, stamina);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_movement);
+        schedule.add_systems(player_actions);
         schedule.run(world);
     }
 
@@ -399,7 +445,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_movement);
+        schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
         let turn = world.resource::<TurnState>();
@@ -467,7 +513,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 10.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_movement);
+        schedule.add_systems(player_actions);
         schedule.run(&mut world);
 
         let turn = world.resource::<TurnState>();
@@ -479,6 +525,82 @@ mod tests {
             .next()
             .expect("test player should exist");
         assert!(stamina.current > 10.0);
+    }
+
+    #[test]
+    fn toggling_sprint_changes_movement_mode_without_consuming_turn() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        world.insert_resource(PlayerIntent {
+            action: Some(PlayerAction::ToggleSprint),
+        });
+        world.insert_resource(TurnState::default());
+        spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_actions);
+        schedule.run(&mut world);
+
+        assert!(!world.resource::<TurnState>().consumed);
+
+        let mut player_query = world.query_filtered::<&MovementState, With<Player>>();
+        let movement_state = player_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(
+            movement_state.mode,
+            crate::movement::MovementMode::Sprinting
+        );
+    }
+
+    #[test]
+    fn player_can_pick_up_loose_parcel_on_same_tile() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        world.insert_resource(PlayerIntent {
+            action: Some(PlayerAction::PickUp),
+        });
+        world.insert_resource(TurnState::default());
+        spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
+        spawn_test_parcel(&mut world, Position { x: 2, y: 2 });
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_actions);
+        schedule.run(&mut world);
+
+        assert!(world.resource::<TurnState>().consumed);
+
+        let mut cargo_query = world.query_filtered::<&Cargo, With<Player>>();
+        let cargo = cargo_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(cargo.current_weight, 5.0);
+
+        let mut parcel_query = world.query::<&ParcelState>();
+        let carried_parcels = parcel_query
+            .iter(&world)
+            .filter(|state| matches!(state, ParcelState::CarriedBy(_)))
+            .count();
+        assert_eq!(carried_parcels, 1);
+    }
+
+    #[test]
+    fn failed_pickup_does_not_consume_turn() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        world.insert_resource(PlayerIntent {
+            action: Some(PlayerAction::PickUp),
+        });
+        world.insert_resource(TurnState { consumed: true });
+        spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_actions);
+        schedule.run(&mut world);
+
+        assert!(!world.resource::<TurnState>().consumed);
     }
 
     #[test]

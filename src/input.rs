@@ -39,6 +39,14 @@ impl Default for KeyBindings {
                     keys: vec![KeyCode::Space, KeyCode::Period],
                     action: PlayerAction::Wait,
                 },
+                KeyBinding {
+                    keys: vec![KeyCode::E],
+                    action: PlayerAction::PickUp,
+                },
+                KeyBinding {
+                    keys: vec![KeyCode::LeftShift, KeyCode::RightShift],
+                    action: PlayerAction::ToggleSprint,
+                },
             ],
             menu: vec![
                 KeyBinding {
