@@ -26,6 +26,17 @@ impl Terrain {
         }
     }
 
+    pub fn stamina_delta(self) -> f32 {
+        match self {
+            Terrain::Grass => 0.0,
+            Terrain::Mud => -2.0,
+            Terrain::Rock => -3.5,
+            Terrain::Water => 0.0,
+            Terrain::Road => 0.75,
+            Terrain::Depot => 1.5,
+        }
+    }
+
     pub fn color(self) -> Color {
         match self {
             Terrain::Grass => Color::from_rgba(64, 128, 72, 255),

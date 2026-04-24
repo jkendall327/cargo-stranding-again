@@ -13,6 +13,8 @@ type AgentJobItem<'a> = (
     &'a mut StepCooldown,
 );
 
+const WAIT_STAMINA_RECOVERY: f32 = 3.0;
+
 pub fn tick_clock(mut clock: ResMut<SimulationClock>) {
     clock.turn += 1;
 }
@@ -40,7 +42,7 @@ pub fn player_movement(
     velocity.dy = 0;
 
     if input.wait {
-        stamina.current = (stamina.current + 0.35).min(stamina.max);
+        stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
         turn.consumed = true;
         return;
     }
@@ -55,9 +57,12 @@ pub fn player_movement(
     }
 
     let load_factor = 1.0 + cargo.current_weight / cargo.max_weight.max(1.0);
-    let stamina_cost = terrain.movement_cost() * load_factor;
-    if stamina.current < stamina_cost {
-        stamina.current = (stamina.current + 0.1).min(stamina.max);
+    let stamina_delta = if terrain.stamina_delta().is_sign_negative() {
+        terrain.stamina_delta() * load_factor
+    } else {
+        terrain.stamina_delta()
+    };
+    if stamina_delta.is_sign_negative() && stamina.current < stamina_delta.abs() {
         return;
     }
 
@@ -65,7 +70,7 @@ pub fn player_movement(
     position.y = next_y;
     velocity.dx = input.move_x;
     velocity.dy = input.move_y;
-    stamina.current -= stamina_cost;
+    stamina.current = (stamina.current + stamina_delta).clamp(0.0, stamina.max);
     turn.consumed = true;
 }
 
@@ -194,6 +199,7 @@ fn step_delay(map: &Map, x: i32, y: i32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::Terrain;
 
     fn spawn_test_agent(world: &mut World, id: usize, position: Position) {
         world.spawn((
@@ -232,6 +238,37 @@ mod tests {
         ));
     }
 
+    fn find_adjacent_terrain_pair(map: &Map, terrain: Terrain) -> (Position, Position) {
+        for y in 0..map.height {
+            for x in 0..(map.width - 1) {
+                if map.terrain_at(x, y) == Some(terrain)
+                    && map.terrain_at(x + 1, y) == Some(terrain)
+                {
+                    return (Position { x, y }, Position { x: x + 1, y });
+                }
+            }
+        }
+        panic!("test map should contain adjacent {terrain:?} tiles");
+    }
+
+    fn run_player_move(world: &mut World, start: Position, target: Position, stamina: f32) {
+        let dx = target.x - start.x;
+        let dy = target.y - start.y;
+        assert!(dx.abs() + dy.abs() == 1);
+
+        world.insert_resource(InputState {
+            move_x: dx,
+            move_y: dy,
+            wait: false,
+        });
+        world.insert_resource(TurnState::default());
+        spawn_test_player(world, start, stamina);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_movement);
+        schedule.run(world);
+    }
+
     #[test]
     fn failed_player_movement_does_not_consume_turn() {
         let mut world = World::new();
@@ -257,6 +294,49 @@ mod tests {
             .next()
             .expect("test player should exist");
         assert_eq!(*position, Position { x: 0, y: 0 });
+    }
+
+    #[test]
+    fn grass_movement_consumes_turn_without_draining_stamina() {
+        let mut world = World::new();
+        let map = Map::generate();
+        let (start, target) = find_adjacent_terrain_pair(&map, Terrain::Grass);
+        world.insert_resource(map);
+
+        run_player_move(&mut world, start, target, 10.0);
+
+        let turn = world.resource::<TurnState>();
+        assert!(turn.consumed);
+
+        let mut player_query = world.query_filtered::<&Stamina, With<Player>>();
+        let stamina = player_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(stamina.current, 10.0);
+    }
+
+    #[test]
+    fn road_movement_consumes_turn_and_recovers_stamina() {
+        let mut world = World::new();
+        let map = Map::generate();
+        let target = Position { x: 6, y: 31 };
+        let start = Position { x: 5, y: 31 };
+        assert_eq!(map.terrain_at(start.x, start.y), Some(Terrain::Road));
+        assert_eq!(map.terrain_at(target.x, target.y), Some(Terrain::Road));
+        world.insert_resource(map);
+
+        run_player_move(&mut world, start, target, 10.0);
+
+        let turn = world.resource::<TurnState>();
+        assert!(turn.consumed);
+
+        let mut player_query = world.query_filtered::<&Stamina, With<Player>>();
+        let stamina = player_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert!(stamina.current > 10.0);
     }
 
     #[test]

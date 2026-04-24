@@ -213,8 +213,9 @@ fn draw_ui(world: &mut World) {
     ui_line(&mut y, "Space / .: wait and recover stamina");
     ui_line(&mut y, "Turns advance only on valid action");
     ui_line(&mut y, "Water blocks movement");
-    ui_line(&mut y, "Mud/Rock cost more stamina");
-    ui_line(&mut y, "Roads are cheap traversal");
+    ui_line(&mut y, "Grass is stamina-neutral");
+    ui_line(&mut y, "Mud/Rock drain stamina");
+    ui_line(&mut y, "Roads/Depot restore stamina");
     y += 18.0;
 
     draw_text("Legend", UI_X, y, 22.0, WHITE);

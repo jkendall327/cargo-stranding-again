@@ -18,8 +18,10 @@ cargo run
 - Move with `WASD` or arrow keys.
 - Wait with `Space` or `.`.
 - Water and map bounds block movement.
-- Mud, rock, cargo weight, and roads affect stamina cost.
+- Grass is stamina-neutral.
+- Mud and rock drain stamina, with cargo making that drain worse.
+- Roads and the depot restore stamina when traversed.
 - Turns advance only when movement succeeds or you wait. Failed movement does not consume a turn.
-- Waiting recovers stamina slowly.
+- Waiting recovers stamina directly.
 
 The prototype spawns loose cargo parcels, NPC porters, one depot, and simple delivery jobs. Porters greedily walk to parcels, pick them up, walk to the depot, and drop them off.
