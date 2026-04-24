@@ -10,7 +10,7 @@ use macroquad::prelude::*;
 use components::*;
 use map::Map;
 use render::window_conf;
-use resources::{InputState, SimulationClock, TurnState};
+use resources::{Camera, InputAction, InputRepeat, InputState, SimulationClock, TurnState};
 
 #[macroquad::main(window_conf)]
 async fn main() {
@@ -53,7 +53,9 @@ async fn main() {
 fn init_world(world: &mut World) {
     world.insert_resource(Map::generate());
     world.insert_resource(InputState::default());
+    world.insert_resource(InputRepeat::default());
     world.insert_resource(TurnState::default());
+    world.insert_resource(Camera::default());
     world.insert_resource(SimulationClock {
         turn: 0,
         delivered_parcels: 0,
@@ -106,18 +108,46 @@ fn init_world(world: &mut World) {
 }
 
 fn copy_input_to_ecs(world: &mut World) {
-    let mut input = world.resource_mut::<InputState>();
-    *input = InputState::default();
+    let held_action = current_held_action();
+    let newly_pressed_action = current_pressed_action();
+    let action = world.resource_mut::<InputRepeat>().action_for_frame(
+        held_action,
+        newly_pressed_action,
+        get_time(),
+    );
 
+    *world.resource_mut::<InputState>() =
+        action.map(InputAction::to_input_state).unwrap_or_default();
+}
+
+fn current_held_action() -> Option<InputAction> {
+    if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
+        Some(InputAction::MoveLeft)
+    } else if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
+        Some(InputAction::MoveRight)
+    } else if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
+        Some(InputAction::MoveUp)
+    } else if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
+        Some(InputAction::MoveDown)
+    } else if is_key_down(KeyCode::Space) || is_key_down(KeyCode::Period) {
+        Some(InputAction::Wait)
+    } else {
+        None
+    }
+}
+
+fn current_pressed_action() -> Option<InputAction> {
     if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
-        input.move_x = -1;
+        Some(InputAction::MoveLeft)
     } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
-        input.move_x = 1;
+        Some(InputAction::MoveRight)
     } else if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
-        input.move_y = -1;
+        Some(InputAction::MoveUp)
     } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
-        input.move_y = 1;
+        Some(InputAction::MoveDown)
     } else if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Period) {
-        input.wait = true;
+        Some(InputAction::Wait)
+    } else {
+        None
     }
 }

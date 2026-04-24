@@ -3,17 +3,22 @@ use macroquad::prelude::*;
 
 use crate::components::*;
 use crate::map::Map;
-use crate::resources::SimulationClock;
+use crate::resources::{Camera, SimulationClock, DEFAULT_CAMERA_TILE_SPAN};
 
 pub const TILE_SIZE: f32 = 16.0;
-const UI_X: f32 = 980.0;
+const VIEWPORT_X: f32 = 24.0;
+const VIEWPORT_Y: f32 = 24.0;
+const UI_GAP: f32 = 28.0;
 
 pub fn window_conf() -> Conf {
     Conf {
         window_title: "Cargo Stranding Again".to_owned(),
-        // The map is 60x40 tiles at 16px, so 960x640. Leave enough room for
-        // the right-hand debug panel by default instead of requiring resize.
-        window_width: 1360,
+        // The camera shows a configurable tile square while the debug panel
+        // stays fixed to the right.
+        window_width: (VIEWPORT_X * 2.0
+            + DEFAULT_CAMERA_TILE_SPAN as f32 * TILE_SIZE
+            + UI_GAP
+            + 360.0) as i32,
         window_height: 760,
         high_dpi: true,
         ..Default::default()
@@ -23,21 +28,67 @@ pub fn window_conf() -> Conf {
 pub fn render(world: &mut World) {
     clear_background(Color::from_rgba(16, 18, 20, 255));
 
-    let map = world.resource::<Map>();
-    draw_map(map);
+    update_camera(world);
+    let camera = *world.resource::<Camera>();
 
-    draw_parcels(world);
-    draw_agents(world);
-    draw_player(world);
-    draw_ui(world);
+    draw_viewport_background(camera);
+
+    {
+        let map = world.resource::<Map>();
+        draw_map(map, camera);
+    }
+
+    draw_parcels(world, camera);
+    draw_agents(world, camera);
+    draw_player(world, camera);
+    draw_viewport_frame(camera);
+    draw_ui(world, camera);
 }
 
-fn draw_map(map: &Map) {
-    for y in 0..map.height {
-        for x in 0..map.width {
+fn update_camera(world: &mut World) {
+    let player_position = {
+        let mut query = world.query_filtered::<&Position, With<Player>>();
+        query.iter(world).next().copied()
+    };
+    let Some(player_position) = player_position else {
+        return;
+    };
+
+    let (map_width, map_height) = {
+        let map = world.resource::<Map>();
+        (map.width, map.height)
+    };
+    world
+        .resource_mut::<Camera>()
+        .center_on(player_position, map_width, map_height);
+}
+
+fn draw_viewport_background(camera: Camera) {
+    draw_rectangle(
+        VIEWPORT_X - 4.0,
+        VIEWPORT_Y - 4.0,
+        viewport_width(camera) + 8.0,
+        viewport_height(camera) + 8.0,
+        Color::from_rgba(8, 10, 12, 255),
+    );
+}
+
+fn draw_viewport_frame(camera: Camera) {
+    draw_rectangle_lines(
+        VIEWPORT_X - 1.0,
+        VIEWPORT_Y - 1.0,
+        viewport_width(camera) + 2.0,
+        viewport_height(camera) + 2.0,
+        2.0,
+        Color::from_rgba(215, 220, 226, 180),
+    );
+}
+
+fn draw_map(map: &Map, camera: Camera) {
+    for y in camera.y..(camera.y + camera.height).min(map.height) {
+        for x in camera.x..(camera.x + camera.width).min(map.width) {
             let terrain = map.terrain_at(x, y).expect("map iteration is in bounds");
-            let px = x as f32 * TILE_SIZE;
-            let py = y as f32 * TILE_SIZE;
+            let (px, py) = tile_to_screen(camera, x, y);
             draw_rectangle(px, py, TILE_SIZE, TILE_SIZE, terrain.color());
             draw_rectangle_lines(
                 px,
@@ -61,14 +112,18 @@ fn draw_map(map: &Map) {
     }
 }
 
-fn draw_parcels(world: &mut World) {
+fn draw_parcels(world: &mut World, camera: Camera) {
     let mut query = world.query::<(&Position, &CargoParcel, &ParcelState)>();
     for (position, parcel, state) in query.iter(world) {
         if !matches!(state, ParcelState::Loose | ParcelState::AssignedTo(_)) {
             continue;
         }
-        let cx = position.x as f32 * TILE_SIZE + TILE_SIZE / 2.0;
-        let cy = position.y as f32 * TILE_SIZE + TILE_SIZE / 2.0;
+        if !camera.contains(*position) {
+            continue;
+        }
+        let (px, py) = tile_to_screen(camera, position.x, position.y);
+        let cx = px + TILE_SIZE / 2.0;
+        let cy = py + TILE_SIZE / 2.0;
         let color = if matches!(state, ParcelState::AssignedTo(_)) {
             Color::from_rgba(252, 204, 84, 255)
         } else {
@@ -85,11 +140,13 @@ fn draw_parcels(world: &mut World) {
     }
 }
 
-fn draw_agents(world: &mut World) {
+fn draw_agents(world: &mut World, camera: Camera) {
     let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob)>();
     for (position, agent, cargo, job) in query.iter(world) {
-        let px = position.x as f32 * TILE_SIZE;
-        let py = position.y as f32 * TILE_SIZE;
+        if !camera.contains(*position) {
+            continue;
+        }
+        let (px, py) = tile_to_screen(camera, position.x, position.y);
         let color = if cargo.current_weight > 0.0 {
             Color::from_rgba(238, 196, 99, 255)
         } else {
@@ -112,14 +169,16 @@ fn draw_agents(world: &mut World) {
     }
 }
 
-fn draw_player(world: &mut World) {
+fn draw_player(world: &mut World, camera: Camera) {
     let mut query = world.query_filtered::<(&Position, &Stamina, &Cargo), With<Player>>();
     let Some((position, stamina, cargo)) = query.iter(world).next() else {
         return;
     };
+    if !camera.contains(*position) {
+        return;
+    }
 
-    let px = position.x as f32 * TILE_SIZE;
-    let py = position.y as f32 * TILE_SIZE;
+    let (px, py) = tile_to_screen(camera, position.x, position.y);
     draw_rectangle(
         px + 2.0,
         py + 2.0,
@@ -161,11 +220,12 @@ fn draw_player(world: &mut World) {
     }
 }
 
-fn draw_ui(world: &mut World) {
+fn draw_ui(world: &mut World, camera: Camera) {
+    let ui_x = ui_x(camera);
     draw_rectangle(
-        UI_X - 12.0,
+        ui_x - 12.0,
         0.0,
-        screen_width() - UI_X + 12.0,
+        screen_width() - ui_x + 12.0,
         screen_height(),
         Color::from_rgba(24, 27, 31, 245),
     );
@@ -178,55 +238,67 @@ fn draw_ui(world: &mut World) {
         .expect("player exists for UI");
 
     let mut y = 34.0;
-    draw_text("Cargo Stranding Again", UI_X, y, 26.0, WHITE);
+    draw_text("Cargo Stranding Again", ui_x, y, 26.0, WHITE);
     y += 34.0;
-    draw_text("Macroquad frame loop + Bevy ECS sim", UI_X, y, 18.0, GRAY);
+    draw_text("Macroquad frame loop + Bevy ECS sim", ui_x, y, 18.0, GRAY);
     y += 38.0;
 
-    ui_line(&mut y, &format!("Turn: {}", clock.turn));
+    ui_line(ui_x, &mut y, &format!("Turn: {}", clock.turn));
     ui_line(
+        ui_x,
+        &mut y,
+        &format!(
+            "Camera: {},{} | {}x{}",
+            camera.x, camera.y, camera.width, camera.height
+        ),
+    );
+    ui_line(
+        ui_x,
         &mut y,
         &format!("Player: {}, {}", player_position.x, player_position.y),
     );
     ui_line(
+        ui_x,
         &mut y,
         &format!("Stamina: {:.1}/{:.1}", stamina.current, stamina.max),
     );
     ui_line(
+        ui_x,
         &mut y,
         &format!("Cargo: {:.1}/{:.1}", cargo.current_weight, cargo.max_weight),
     );
     ui_line(
+        ui_x,
         &mut y,
         &format!("Delivered parcels: {}", clock.delivered_parcels),
     );
     y += 18.0;
 
-    draw_text("Porters", UI_X, y, 22.0, WHITE);
+    draw_text("Porters", ui_x, y, 22.0, WHITE);
     y += 28.0;
-    draw_agent_debug(world, &mut y);
+    draw_agent_debug(world, ui_x, &mut y);
     y += 18.0;
 
-    draw_text("Controls", UI_X, y, 22.0, WHITE);
+    draw_text("Controls", ui_x, y, 22.0, WHITE);
     y += 28.0;
-    ui_line(&mut y, "WASD / Arrows: move one tile");
-    ui_line(&mut y, "Space / .: wait and recover stamina");
-    ui_line(&mut y, "Turns advance only on valid action");
-    ui_line(&mut y, "Water blocks movement");
-    ui_line(&mut y, "Grass is stamina-neutral");
-    ui_line(&mut y, "Mud/Rock drain stamina");
-    ui_line(&mut y, "Roads/Depot restore stamina");
+    ui_line(ui_x, &mut y, "WASD / Arrows: move one tile");
+    ui_line(ui_x, &mut y, "Space / .: wait and recover stamina");
+    ui_line(ui_x, &mut y, "Turns advance only on valid action");
+    ui_line(ui_x, &mut y, "Water blocks movement");
+    ui_line(ui_x, &mut y, "Grass is stamina-neutral");
+    ui_line(ui_x, &mut y, "Mud/Rock drain stamina");
+    ui_line(ui_x, &mut y, "Roads/Depot restore stamina");
     y += 18.0;
 
-    draw_text("Legend", UI_X, y, 22.0, WHITE);
+    draw_text("Legend", ui_x, y, 22.0, WHITE);
     y += 28.0;
-    ui_line(&mut y, "@ player");
-    ui_line(&mut y, "Green/Gold circles: porters");
-    ui_line(&mut y, "Orange boxes: loose cargo");
-    ui_line(&mut y, "D: depot");
+    ui_line(ui_x, &mut y, "@ player");
+    ui_line(ui_x, &mut y, "Green/Gold circles: porters");
+    ui_line(ui_x, &mut y, "Orange boxes: loose cargo");
+    ui_line(ui_x, &mut y, "D: depot");
 }
 
-fn draw_agent_debug(world: &mut World, y: &mut f32) {
+fn draw_agent_debug(world: &mut World, ui_x: f32, y: &mut f32) {
     let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob, &StepCooldown)>();
     let mut rows = query.iter(world).collect::<Vec<_>>();
     rows.sort_by_key(|(_, agent, _, _, _)| agent.id);
@@ -239,6 +311,7 @@ fn draw_agent_debug(world: &mut World, y: &mut f32) {
             JobPhase::Done => "done",
         };
         ui_line(
+            ui_x,
             y,
             &format!(
                 "P{}: {},{} | {} | load {:.0} | cd {}",
@@ -248,7 +321,26 @@ fn draw_agent_debug(world: &mut World, y: &mut f32) {
     }
 }
 
-fn ui_line(y: &mut f32, text: &str) {
-    draw_text(text, UI_X, *y, 18.0, Color::from_rgba(220, 225, 230, 255));
+fn ui_line(ui_x: f32, y: &mut f32, text: &str) {
+    draw_text(text, ui_x, *y, 18.0, Color::from_rgba(220, 225, 230, 255));
     *y += 24.0;
+}
+
+fn tile_to_screen(camera: Camera, x: i32, y: i32) -> (f32, f32) {
+    (
+        VIEWPORT_X + (x - camera.x) as f32 * TILE_SIZE,
+        VIEWPORT_Y + (y - camera.y) as f32 * TILE_SIZE,
+    )
+}
+
+fn viewport_width(camera: Camera) -> f32 {
+    camera.width as f32 * TILE_SIZE
+}
+
+fn viewport_height(camera: Camera) -> f32 {
+    camera.height as f32 * TILE_SIZE
+}
+
+fn ui_x(camera: Camera) -> f32 {
+    VIEWPORT_X + viewport_width(camera) + UI_GAP
 }
