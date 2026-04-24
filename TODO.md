@@ -57,8 +57,8 @@ Goal: move player and NPC movement through shared movement-resolution code inste
   - [x] Start with `Walking`.
   - [x] Leave room for `Sprinting`, `Crawling`, `Swimming`, `Climbing`, `Rappelling`, and `Falling`.
   - [x] Do not build all modes until a feature uses them.
-- [x] Extract terrain/stamina/cargo movement calculation out of `systems::player_movement`.
-- [x] Make `systems::player_movement` consume `PlayerIntent` and call the shared resolver.
+- [x] Extract terrain/stamina/cargo movement calculation out of `systems::player_actions`.
+- [x] Make `systems::player_actions` consume `PlayerIntent` and call the shared resolver.
 - [x] Make `systems::agent_jobs` call the shared resolver or a shared passability/cost helper.
 - [x] Keep failed movement from consuming a turn.
 - [x] Add tests for the resolver itself.
@@ -71,7 +71,7 @@ Goal: move player and NPC movement through shared movement-resolution code inste
 
 Notes for future Codex runs:
 
-- Current movement code lives in `src/systems.rs::player_movement`.
+- Current player action code lives in `src/systems.rs::player_actions`.
 - Agent stepping lives in `greedy_step` and `step_delay` in `src/systems.rs`.
 - Terrain stats currently live as methods on `src/map.rs::Terrain`.
 - Be careful with Rust borrow rules if the resolver needs map data plus mutable components; a pure helper returning a decision is probably easiest first.
@@ -94,7 +94,85 @@ Goal: grow `PlayerAction` deliberately without turning it into input-shaped move
 - [ ] Keep menu actions separate from gameplay actions.
 - [ ] Keep contextual actions resolved after input, not inside keybinding lookup.
 
-## 3. Serious Cargo Model
+## 3. Action Energy Timeline
+
+Goal: replace the current player-action heartbeat with a shared energy timeline so movement speed, terrain, stamina, cargo, combat, pickup/drop, and future debuffs all speak the same scheduling language.
+
+Design decisions:
+
+- One player input attempts one atomic action.
+  - `Move(North)` moves at most one tile.
+  - Sprinting should be visible through lower action delay / NPC timing, not by skipping multiple tiles in one input.
+- Use an energy timeline rather than "player action, then every NPC acts once."
+  - Actors act when they have enough energy for their next action.
+  - A priority queue or equivalent ready-time scheduler is the likely fit.
+- Sprinting lowers movement energy cost and increases stamina/stability cost.
+- Stamina can start as a hard gate for draining actions.
+  - Later, low stamina can become a risk/performance modifier without changing the scheduler architecture.
+- Non-movement actions should also cost energy.
+  - Simple defaults for now: movement, wait/rest, pickup/drop, interact, and future attacks all spend action energy.
+  - Exhaustion, bleeding, heavy load, weather, or injuries can become generalized energy/recovery modifiers.
+- Changing movement posture remains free for now.
+  - Bracing can later be a separate action that costs energy because it has immediate defensive value.
+- Keep physical momentum separate from scheduling energy.
+  - `Energy`: when/how often an actor can act.
+  - `Momentum`: body state and stability risk.
+  - `MovementState`: chosen posture/effort.
+
+Implementation tasks:
+
+- [ ] Add an `ActionEnergy` component.
+  - [ ] Track current energy and maximum/ready threshold.
+  - [ ] Decide whether actors start ready or accumulate energy from zero.
+  - [ ] Keep values integer if possible for deterministic scheduling.
+- [ ] Define action energy costs.
+  - [ ] Walking movement baseline, e.g. `100`.
+  - [ ] Sprinting movement cheaper than walking, e.g. `60`, before terrain/load modifiers.
+  - [ ] Wait/rest baseline.
+  - [ ] Pickup/drop baseline.
+  - [ ] Future interact/combat placeholders.
+- [ ] Extend movement resolution to report `energy_cost`.
+  - [ ] Keep `resolve_movement` single-tile and pure.
+  - [ ] Apply terrain/load/movement-mode modifiers to energy cost.
+  - [ ] Preserve stamina delta and passability behavior.
+- [ ] Refactor turn advancement into an energy scheduler.
+  - [ ] Replace or demote the current `TurnState { consumed }` heartbeat.
+  - [ ] Add a scheduler resource or priority queue keyed by actor ready time.
+  - [ ] Let the player act only when ready.
+  - [ ] Let NPCs act according to the same energy rules.
+  - [ ] Keep failed actions from spending energy for now.
+- [ ] Update NPC porter movement to consume action energy instead of `StepCooldown`.
+  - [ ] Remove or adapt `StepCooldown` once energy covers the same need.
+  - [ ] Keep greedy pathing simple until pathfinding work starts.
+- [ ] Update pickup/drop and wait/rest to spend action energy.
+  - [ ] Successful pickup spends energy.
+  - [ ] Failed pickup spends no energy for now.
+  - [ ] Wait/rest spends energy and restores stamina.
+- [ ] Add UI/debug output.
+  - [ ] Show player energy/ready state.
+  - [ ] Show NPC energy/ready state in porter debug rows.
+  - [ ] Show current movement posture.
+- [ ] Add tests.
+  - [ ] Sprinting movement costs less energy than walking.
+  - [ ] Sprinting movement still costs more stamina than walking.
+  - [ ] Failed movement spends no energy.
+  - [ ] Successful pickup spends energy.
+  - [ ] Failed pickup spends no energy.
+  - [ ] Faster actor can act more often than slower actor over the same timeline.
+  - [ ] NPC delivery still progresses under energy scheduling.
+
+Momentum tasks for after the energy timeline:
+
+- [ ] Add a grid-friendly `Momentum` component.
+  - [ ] Store direction plus amount, e.g. `Momentum { direction: Option<Direction>, amount: f32 }`.
+  - [ ] Continuing straight increases or preserves momentum.
+  - [ ] Slowing/stopping decays momentum.
+  - [ ] Turning at high momentum increases stumble/fall risk later.
+- [ ] Keep momentum risk-only at first.
+  - [ ] Momentum should not force automatic carry-through movement in the first version.
+  - [ ] Later, high momentum may force carry-through if that becomes worth the complexity.
+
+## 4. Serious Cargo Model
 
 Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model with entity relationships, carry slots, and derived load totals.
 
@@ -133,7 +211,7 @@ Notes:
 - Existing porter job code directly adds/subtracts parcel weight from `Cargo`.
 - This is probably the largest near-term domain change.
 
-## 4. Data-Driven Terrain And Items
+## 5. Data-Driven Terrain And Items
 
 Goal: stop hardcoding every terrain/item stat in Rust once the domain model settles enough.
 
@@ -162,7 +240,7 @@ Goal: stop hardcoding every terrain/item stat in Rust once the domain model sett
   - [ ] cargo tags/properties
 - [ ] Add tests for loading and validating definitions.
 
-## 5. NPC Goals And Jobs
+## 6. NPC Goals And Jobs
 
 Goal: move from hardcoded porter delivery behavior toward simple goal-driven agents.
 
@@ -193,7 +271,7 @@ Current code pointers:
 - `agent_jobs` moves through `FindParcel`, `GoToParcel`, `GoToDepot`, `Done`.
 - `greedy_step` is deliberately simple and should be replaced before worldgen gets serious.
 
-## 6. Simulationist Body, Balance, And Weather
+## 7. Simulationist Body, Balance, And Weather
 
 Goal: add deeper simulation features as layered ECS systems, not as extra branches in movement.
 
@@ -221,7 +299,7 @@ Implementation note:
 
 - Build this only after movement and cargo have clean enough boundaries. Weather that directly edits player movement will make later refactors painful.
 
-## 7. Chunked Map And Procgen
+## 8. Chunked Map And Procgen
 
 Goal: move from one fixed rectangle to deterministic, streamable world data.
 
@@ -257,7 +335,7 @@ Current code pointers:
 - `src/resources.rs::Camera` clamps to map width/height.
 - Rendering loops over `camera.x..camera.x + camera.width`, using `map.terrain_at`.
 
-## 8. Verticality
+## 9. Verticality
 
 Goal: support cliffs, deep water, falling, climbing, ropes, rappelling, and slopes without pretending the current `Position { x, y }` is enough forever.
 
@@ -286,7 +364,7 @@ Note:
 
 - Do not immediately rewrite the whole game as 3D. Add elevation/depth to terrain/chunks first, then entity z/vertical state when gameplay demands it.
 
-## 9. UI, Menus, And Rebinding
+## 10. UI, Menus, And Rebinding
 
 Goal: make the existing keybinding resource visible and editable through the game.
 
@@ -310,7 +388,7 @@ Current code pointers:
 - `src/main.rs::copy_input_to_ecs` reads those bindings.
 - `src/systems.rs::menu_navigation` already opens `OptionsMenu`, but there is not yet real options UI.
 
-## 10. Save/Load
+## 11. Save/Load
 
 Goal: add persistence before worldgen and cargo relationships become too large to reason about casually.
 
@@ -327,7 +405,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
 - [ ] Add load path in startup/debug menu.
 - [ ] Add round-trip tests.
 
-## 11. Code Organization
+## 12. Code Organization
 
 Goal: keep the project pleasant as it stops being tiny.
 
@@ -348,16 +426,17 @@ Goal: keep the project pleasant as it stops being tiny.
 
 1. Extract shared movement resolution.
 2. Add `MovementMode::Walking` and prepare for sprint/crawl/swim.
-3. Replace direct cargo-weight mutation with item/carry relationships.
-4. Update NPC porter jobs to use the cargo model.
-5. Add simple pathfinding for NPCs.
-6. Move terrain stats into data definitions.
-7. Add real options/keybinding UI and keybinding persistence.
-8. Add save/load for the current fixed world.
-9. Introduce chunk coordinate types and chunk-backed map storage.
-10. Add deterministic chunk generation.
-11. Add elevation/depth fields.
-12. Add weather/balance systems once movement/cargo/world data have stable boundaries.
+3. Add the action energy timeline.
+4. Replace direct cargo-weight mutation with item/carry relationships.
+5. Update NPC porter jobs to use the cargo model.
+6. Add simple pathfinding for NPCs.
+7. Move terrain stats into data definitions.
+8. Add real options/keybinding UI and keybinding persistence.
+9. Add save/load for the current fixed world.
+10. Introduce chunk coordinate types and chunk-backed map storage.
+11. Add deterministic chunk generation.
+12. Add elevation/depth fields.
+13. Add momentum, balance, and weather systems once movement/cargo/world data have stable boundaries.
 
 ## Useful Guardrails
 
