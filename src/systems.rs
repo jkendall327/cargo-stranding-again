@@ -185,3 +185,106 @@ fn step_delay(map: &Map, x: i32, y: i32) -> u32 {
         .map_or(1.0, |terrain| terrain.movement_cost());
     (6.0 + cost * 5.0) as u32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn_test_agent(world: &mut World, id: usize, position: Position) {
+        world.spawn((
+            Agent { id },
+            position,
+            Velocity::default(),
+            Cargo {
+                current_weight: 0.0,
+                max_weight: 35.0,
+            },
+            AssignedJob {
+                phase: JobPhase::FindParcel,
+                parcel: None,
+            },
+            StepCooldown::default(),
+        ));
+    }
+
+    fn spawn_test_parcel(world: &mut World, position: Position) {
+        world.spawn((position, CargoParcel { weight: 5.0 }, ParcelState::Loose));
+    }
+
+    #[test]
+    fn agents_reserve_distinct_loose_parcels() {
+        let mut world = World::new();
+        spawn_test_agent(&mut world, 0, Position { x: 0, y: 0 });
+        spawn_test_agent(&mut world, 1, Position { x: 1, y: 0 });
+        spawn_test_parcel(&mut world, Position { x: 2, y: 0 });
+        spawn_test_parcel(&mut world, Position { x: 3, y: 0 });
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(assign_agent_jobs);
+        schedule.run(&mut world);
+
+        let mut job_query = world.query::<&AssignedJob>();
+        let assigned_jobs = job_query
+            .iter(&world)
+            .filter(|job| matches!(job.phase, JobPhase::GoToParcel) && job.parcel.is_some())
+            .count();
+        assert_eq!(assigned_jobs, 2);
+
+        let mut parcel_query = world.query::<&ParcelState>();
+        let reserved_parcels = parcel_query
+            .iter(&world)
+            .filter(|state| matches!(state, ParcelState::AssignedTo(_)))
+            .count();
+        assert_eq!(reserved_parcels, 2);
+    }
+
+    #[test]
+    fn agent_picks_up_and_delivers_parcel_to_depot() {
+        let mut world = World::new();
+        let map = Map::generate();
+        let depot = map.depot;
+        world.insert_resource(map);
+        world.insert_resource(SimulationClock {
+            turn: 0,
+            delivered_parcels: 0,
+        });
+        spawn_test_agent(
+            &mut world,
+            0,
+            Position {
+                x: depot.0,
+                y: depot.1,
+            },
+        );
+        spawn_test_parcel(
+            &mut world,
+            Position {
+                x: depot.0,
+                y: depot.1,
+            },
+        );
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((tick_cooldowns, assign_agent_jobs, agent_jobs));
+        for _ in 0..12 {
+            schedule.run(&mut world);
+        }
+
+        let clock = world.resource::<SimulationClock>();
+        assert_eq!(clock.delivered_parcels, 1);
+
+        let mut parcel_query = world.query::<&ParcelState>();
+        let delivered_parcels = parcel_query
+            .iter(&world)
+            .filter(|state| matches!(state, ParcelState::Delivered))
+            .count();
+        assert_eq!(delivered_parcels, 1);
+
+        let mut cargo_query = world.query_filtered::<&Cargo, With<Agent>>();
+        let empty_agents = cargo_query
+            .iter(&world)
+            .filter(|cargo| cargo.current_weight == 0.0)
+            .count();
+        assert_eq!(empty_agents, 1);
+    }
+}

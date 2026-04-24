@@ -11,8 +11,10 @@ const UI_X: f32 = 980.0;
 pub fn window_conf() -> Conf {
     Conf {
         window_title: "Cargo Stranding Again".to_owned(),
-        window_width: 1220,
-        window_height: 720,
+        // The map is 60x40 tiles at 16px, so 960x640. Leave enough room for
+        // the right-hand debug panel by default instead of requiring resize.
+        window_width: 1360,
+        window_height: 760,
         high_dpi: true,
         ..Default::default()
     }
@@ -93,8 +95,12 @@ fn draw_agents(world: &mut World) {
         } else {
             Color::from_rgba(80, 210, 170, 255)
         };
-        draw_circle(px + TILE_SIZE / 2.0, py + TILE_SIZE / 2.0, 6.0, color);
-        draw_text(&format!("{}", agent.id), px + 4.0, py + 12.0, 12.0, BLACK);
+        let cx = px + TILE_SIZE / 2.0;
+        let cy = py + TILE_SIZE / 2.0;
+        draw_circle(cx, cy, 8.0, Color::from_rgba(12, 14, 16, 230));
+        draw_circle(cx, cy, 6.0, color);
+        draw_circle_lines(cx, cy, 9.5, 2.0, WHITE);
+        draw_text(&format!("P{}", agent.id), px + 1.0, py + 13.0, 12.0, BLACK);
 
         let label = match job.phase {
             JobPhase::FindParcel => "?",
@@ -196,6 +202,11 @@ fn draw_ui(world: &mut World) {
     );
     y += 18.0;
 
+    draw_text("Porters", UI_X, y, 22.0, WHITE);
+    y += 28.0;
+    draw_agent_debug(world, &mut y);
+    y += 18.0;
+
     draw_text("Controls", UI_X, y, 22.0, WHITE);
     y += 28.0;
     ui_line(&mut y, "WASD / Arrows: move one tile");
@@ -211,6 +222,28 @@ fn draw_ui(world: &mut World) {
     ui_line(&mut y, "Green/Gold circles: porters");
     ui_line(&mut y, "Orange boxes: loose cargo");
     ui_line(&mut y, "D: depot");
+}
+
+fn draw_agent_debug(world: &mut World, y: &mut f32) {
+    let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob, &StepCooldown)>();
+    let mut rows = query.iter(world).collect::<Vec<_>>();
+    rows.sort_by_key(|(_, agent, _, _, _)| agent.id);
+
+    for (position, agent, cargo, job, cooldown) in rows {
+        let phase = match job.phase {
+            JobPhase::FindParcel => "finding",
+            JobPhase::GoToParcel => "to parcel",
+            JobPhase::GoToDepot => "to depot",
+            JobPhase::Done => "done",
+        };
+        ui_line(
+            y,
+            &format!(
+                "P{}: {},{} | {} | load {:.0} | cd {}",
+                agent.id, position.x, position.y, phase, cargo.current_weight, cooldown.frames
+            ),
+        );
+    }
 }
 
 fn ui_line(y: &mut f32, text: &str) {
