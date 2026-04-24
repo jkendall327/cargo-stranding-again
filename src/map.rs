@@ -76,13 +76,12 @@ impl Map {
     pub fn generate() -> Self {
         let width = MAP_WIDTH;
         let height = MAP_HEIGHT;
-        let mut tiles = vec![Terrain::Grass; (width * height) as usize];
         let depot = (48, 30);
 
         let mut map = Self {
             width,
             height,
-            tiles: std::mem::take(&mut tiles),
+            tiles: vec![Terrain::Grass; (width * height) as usize],
             depot,
         };
 

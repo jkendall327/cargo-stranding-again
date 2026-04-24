@@ -183,21 +183,16 @@ pub fn agent_jobs(
                     continue;
                 }
 
-                if let Some(moved) = greedy_step(
+                step_agent_toward(
                     map,
                     agent_entity,
                     &mut position,
+                    &mut velocity,
+                    &mut cooldown,
                     cargo.current_weight,
                     cargo.max_weight,
-                    parcel_position.x,
-                    parcel_position.y,
-                ) {
-                    velocity.dx = moved.actual_delta.0;
-                    velocity.dy = moved.actual_delta.1;
-                    cooldown.frames = moved.cooldown_cost;
-                } else {
-                    cooldown.frames = step_delay(map, position.x, position.y);
-                }
+                    *parcel_position,
+                );
             }
             JobPhase::GoToDepot => {
                 if position.x == map.depot.0 && position.y == map.depot.1 {
@@ -210,23 +205,40 @@ pub fn agent_jobs(
                     continue;
                 }
 
-                if let Some(moved) = greedy_step(
+                step_agent_toward(
                     map,
                     agent_entity,
                     &mut position,
+                    &mut velocity,
+                    &mut cooldown,
                     cargo.current_weight,
                     cargo.max_weight,
-                    map.depot.0,
-                    map.depot.1,
-                ) {
-                    velocity.dx = moved.actual_delta.0;
-                    velocity.dy = moved.actual_delta.1;
-                    cooldown.frames = moved.cooldown_cost;
-                } else {
-                    cooldown.frames = step_delay(map, position.x, position.y);
-                }
+                    Position {
+                        x: map.depot.0,
+                        y: map.depot.1,
+                    },
+                );
             }
         }
+    }
+}
+
+fn step_agent_toward(
+    map: &Map,
+    entity: Entity,
+    position: &mut Position,
+    velocity: &mut Velocity,
+    cooldown: &mut StepCooldown,
+    current_weight: f32,
+    max_weight: f32,
+    target: Position,
+) {
+    if let Some(moved) = greedy_step(map, entity, position, current_weight, max_weight, target) {
+        velocity.dx = moved.actual_delta.0;
+        velocity.dy = moved.actual_delta.1;
+        cooldown.frames = moved.cooldown_cost;
+    } else {
+        cooldown.frames = step_delay(map, position.x, position.y);
     }
 }
 
@@ -236,12 +248,11 @@ fn greedy_step(
     position: &mut Position,
     current_weight: f32,
     max_weight: f32,
-    target_x: i32,
-    target_y: i32,
+    target: Position,
 ) -> Option<crate::movement::MovementResult> {
-    let dx = (target_x - position.x).signum();
-    let dy = (target_y - position.y).signum();
-    let candidates = if (target_x - position.x).abs() >= (target_y - position.y).abs() {
+    let dx = (target.x - position.x).signum();
+    let dy = (target.y - position.y).signum();
+    let candidates = if (target.x - position.x).abs() >= (target.y - position.y).abs() {
         [(dx, 0), (0, dy), (0, -dy), (-dx, 0)]
     } else {
         [(0, dy), (dx, 0), (-dx, 0), (0, -dy)]

@@ -11,6 +11,22 @@ pub const TILE_SIZE: f32 = 16.0;
 const VIEWPORT_X: f32 = 24.0;
 const VIEWPORT_Y: f32 = 24.0;
 const UI_GAP: f32 = 28.0;
+const CONTROL_HINTS: [&str; 8] = [
+    "WASD / Arrows: move one tile",
+    "Space / .: wait and recover stamina",
+    "Esc: pause / resume",
+    "Turns advance only on valid action",
+    "Water blocks movement",
+    "Grass is stamina-neutral",
+    "Mud/Rock drain stamina",
+    "Roads/Depot restore stamina",
+];
+const LEGEND_LINES: [&str; 4] = [
+    "@ player",
+    "Green/Gold circles: porters",
+    "Orange boxes: loose cargo",
+    "D: depot",
+];
 
 pub fn window_conf() -> Conf {
     Conf {
@@ -284,22 +300,12 @@ fn draw_ui(world: &mut World, camera: Camera) {
 
     draw_text("Controls", ui_x, y, 22.0, WHITE);
     y += 28.0;
-    ui_line(ui_x, &mut y, "WASD / Arrows: move one tile");
-    ui_line(ui_x, &mut y, "Space / .: wait and recover stamina");
-    ui_line(ui_x, &mut y, "Esc: pause / resume");
-    ui_line(ui_x, &mut y, "Turns advance only on valid action");
-    ui_line(ui_x, &mut y, "Water blocks movement");
-    ui_line(ui_x, &mut y, "Grass is stamina-neutral");
-    ui_line(ui_x, &mut y, "Mud/Rock drain stamina");
-    ui_line(ui_x, &mut y, "Roads/Depot restore stamina");
+    ui_lines(ui_x, &mut y, &CONTROL_HINTS);
     y += 18.0;
 
     draw_text("Legend", ui_x, y, 22.0, WHITE);
     y += 28.0;
-    ui_line(ui_x, &mut y, "@ player");
-    ui_line(ui_x, &mut y, "Green/Gold circles: porters");
-    ui_line(ui_x, &mut y, "Orange boxes: loose cargo");
-    ui_line(ui_x, &mut y, "D: depot");
+    ui_lines(ui_x, &mut y, &LEGEND_LINES);
 }
 
 fn draw_game_state_overlay(world: &World) {
@@ -405,6 +411,12 @@ fn draw_agent_debug(world: &mut World, ui_x: f32, y: &mut f32) {
 fn ui_line(ui_x: f32, y: &mut f32, text: &str) {
     draw_text(text, ui_x, *y, 18.0, Color::from_rgba(220, 225, 230, 255));
     *y += 24.0;
+}
+
+fn ui_lines(ui_x: f32, y: &mut f32, lines: &[&str]) {
+    for line in lines {
+        ui_line(ui_x, y, line);
+    }
 }
 
 fn tile_to_screen(camera: Camera, x: i32, y: i32) -> (f32, f32) {
