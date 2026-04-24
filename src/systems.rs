@@ -2,9 +2,13 @@ use bevy_ecs::prelude::*;
 
 use crate::components::*;
 use crate::map::Map;
+use crate::movement::{
+    resolve_movement, terrain_cooldown_cost, CargoLoad, MovementOutcome, MovementRequest,
+    StaminaBudget,
+};
 use crate::resources::{
-    GameScreen, MenuAction, MenuInputState, PauseMenuEntry, PauseMenuState, PlayerAction,
-    PlayerIntent, SimulationClock, TurnState,
+    Direction, GameScreen, MenuAction, MenuInputState, PauseMenuEntry, PauseMenuState,
+    PlayerAction, PlayerIntent, SimulationClock, TurnState,
 };
 
 type AgentJobItem<'a> = (
@@ -65,12 +69,13 @@ pub fn player_movement(
     intent: Res<PlayerIntent>,
     map: Res<Map>,
     mut turn: ResMut<TurnState>,
-    mut query: Query<(&mut Position, &mut Velocity, &mut Stamina, &Cargo), With<Player>>,
+    mut query: Query<(Entity, &mut Position, &mut Velocity, &mut Stamina, &Cargo), With<Player>>,
 ) {
     turn.consumed = false;
 
     let map = &*map;
-    let Ok((mut position, mut velocity, mut stamina, cargo)) = query.get_single_mut() else {
+    let Ok((entity, mut position, mut velocity, mut stamina, cargo)) = query.get_single_mut()
+    else {
         return;
     };
 
@@ -90,32 +95,27 @@ pub fn player_movement(
     let PlayerAction::Move(direction) = action else {
         return;
     };
-    let (move_x, move_y) = direction.delta();
-    let next_x = position.x + move_x;
-    let next_y = position.y + move_y;
-    let Some(terrain) = map.terrain_at(next_x, next_y) else {
-        return;
+    let mut request = MovementRequest::walking(*position, direction);
+    request.entity = Some(entity);
+    request.stamina = Some(StaminaBudget {
+        current: stamina.current,
+        max: stamina.max,
+    });
+    request.cargo = CargoLoad {
+        current_weight: cargo.current_weight,
+        max_weight: cargo.max_weight,
     };
-    if !terrain.passable() {
-        return;
-    }
 
-    let load_factor = 1.0 + cargo.current_weight / cargo.max_weight.max(1.0);
-    let stamina_delta = if terrain.stamina_delta().is_sign_negative() {
-        terrain.stamina_delta() * load_factor
-    } else {
-        terrain.stamina_delta()
-    };
-    if stamina_delta.is_sign_negative() && stamina.current < stamina_delta.abs() {
-        return;
+    let outcome = resolve_movement(map, request);
+    let result = outcome.result();
+    if matches!(outcome, MovementOutcome::Moved(_)) {
+        position.x = result.target.x;
+        position.y = result.target.y;
+        velocity.dx = result.actual_delta.0;
+        velocity.dy = result.actual_delta.1;
+        stamina.current = (stamina.current + result.stamina_delta).clamp(0.0, stamina.max);
+        turn.consumed = result.turn_cost > 0;
     }
-
-    position.x = next_x;
-    position.y = next_y;
-    velocity.dx = move_x;
-    velocity.dy = move_y;
-    stamina.current = (stamina.current + stamina_delta).clamp(0.0, stamina.max);
-    turn.consumed = true;
 }
 
 pub fn assign_agent_jobs(
@@ -183,10 +183,21 @@ pub fn agent_jobs(
                     continue;
                 }
 
-                let moved = greedy_step(map, &mut position, parcel_position.x, parcel_position.y);
-                velocity.dx = moved.0;
-                velocity.dy = moved.1;
-                cooldown.frames = step_delay(map, position.x, position.y);
+                if let Some(moved) = greedy_step(
+                    map,
+                    agent_entity,
+                    &mut position,
+                    cargo.current_weight,
+                    cargo.max_weight,
+                    parcel_position.x,
+                    parcel_position.y,
+                ) {
+                    velocity.dx = moved.actual_delta.0;
+                    velocity.dy = moved.actual_delta.1;
+                    cooldown.frames = moved.cooldown_cost;
+                } else {
+                    cooldown.frames = step_delay(map, position.x, position.y);
+                }
             }
             JobPhase::GoToDepot => {
                 if position.x == map.depot.0 && position.y == map.depot.1 {
@@ -199,16 +210,35 @@ pub fn agent_jobs(
                     continue;
                 }
 
-                let moved = greedy_step(map, &mut position, map.depot.0, map.depot.1);
-                velocity.dx = moved.0;
-                velocity.dy = moved.1;
-                cooldown.frames = step_delay(map, position.x, position.y);
+                if let Some(moved) = greedy_step(
+                    map,
+                    agent_entity,
+                    &mut position,
+                    cargo.current_weight,
+                    cargo.max_weight,
+                    map.depot.0,
+                    map.depot.1,
+                ) {
+                    velocity.dx = moved.actual_delta.0;
+                    velocity.dy = moved.actual_delta.1;
+                    cooldown.frames = moved.cooldown_cost;
+                } else {
+                    cooldown.frames = step_delay(map, position.x, position.y);
+                }
             }
         }
     }
 }
 
-fn greedy_step(map: &Map, position: &mut Position, target_x: i32, target_y: i32) -> (i32, i32) {
+fn greedy_step(
+    map: &Map,
+    entity: Entity,
+    position: &mut Position,
+    current_weight: f32,
+    max_weight: f32,
+    target_x: i32,
+    target_y: i32,
+) -> Option<crate::movement::MovementResult> {
     let dx = (target_x - position.x).signum();
     let dy = (target_y - position.y).signum();
     let candidates = if (target_x - position.x).abs() >= (target_y - position.y).abs() {
@@ -221,23 +251,39 @@ fn greedy_step(map: &Map, position: &mut Position, target_x: i32, target_y: i32)
         if step_x == 0 && step_y == 0 {
             continue;
         }
-        let next_x = position.x + step_x;
-        let next_y = position.y + step_y;
-        if map.is_passable(next_x, next_y) {
-            position.x = next_x;
-            position.y = next_y;
-            return (step_x, step_y);
+        let Some(direction) = direction_from_delta(step_x, step_y) else {
+            continue;
+        };
+        let mut request = MovementRequest::walking(*position, direction);
+        request.entity = Some(entity);
+        request.cargo = CargoLoad {
+            current_weight,
+            max_weight,
+        };
+
+        let outcome = resolve_movement(map, request);
+        if let Some(result) = outcome.moved() {
+            position.x = result.target.x;
+            position.y = result.target.y;
+            return Some(result);
         }
     }
 
-    (0, 0)
+    None
 }
 
 fn step_delay(map: &Map, x: i32, y: i32) -> u32 {
-    let cost = map
-        .terrain_at(x, y)
-        .map_or(1.0, |terrain| terrain.movement_cost());
-    (6.0 + cost * 5.0) as u32
+    map.terrain_at(x, y).map_or(11, terrain_cooldown_cost)
+}
+
+fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
+    match (dx, dy) {
+        (-1, 0) => Some(Direction::West),
+        (1, 0) => Some(Direction::East),
+        (0, -1) => Some(Direction::North),
+        (0, 1) => Some(Direction::South),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

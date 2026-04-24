@@ -48,26 +48,26 @@ Cleanup
 
 Goal: move player and NPC movement through shared movement-resolution code instead of player-only and agent-only movement logic.
 
-- [ ] Add a movement domain module, likely `src/movement.rs`.
-- [ ] Introduce shared movement request/result types.
-  - [ ] `MovementRequest { entity, direction, mode }` or a non-entity helper shape usable in tests.
-  - [ ] `MovementOutcome::Moved`, `Blocked`, `InsufficientStamina`, etc.
-  - [ ] Include the actual `dx/dy`, target position, terrain, stamina delta, and turn/cooldown cost in the result.
-- [ ] Introduce `MovementMode`.
-  - [ ] Start with `Walking`.
-  - [ ] Leave room for `Sprinting`, `Crawling`, `Swimming`, `Climbing`, `Rappelling`, and `Falling`.
-  - [ ] Do not build all modes until a feature uses them.
-- [ ] Extract terrain/stamina/cargo movement calculation out of `systems::player_movement`.
-- [ ] Make `systems::player_movement` consume `PlayerIntent` and call the shared resolver.
-- [ ] Make `systems::agent_jobs` call the shared resolver or a shared passability/cost helper.
-- [ ] Keep failed movement from consuming a turn.
-- [ ] Add tests for the resolver itself.
-  - [ ] Bounds blocked.
-  - [ ] Water blocked.
-  - [ ] Grass neutral.
-  - [ ] Road restores stamina.
-  - [ ] Mud/rock drain stamina.
-  - [ ] Cargo load increases negative stamina costs.
+- [x] Add a movement domain module, likely `src/movement.rs`.
+- [x] Introduce shared movement request/result types.
+  - [x] `MovementRequest { entity, direction, mode }` or a non-entity helper shape usable in tests.
+  - [x] `MovementOutcome::Moved`, `Blocked`, `InsufficientStamina`, etc.
+  - [x] Include the actual `dx/dy`, target position, terrain, stamina delta, and turn/cooldown cost in the result.
+- [x] Introduce `MovementMode`.
+  - [x] Start with `Walking`.
+  - [x] Leave room for `Sprinting`, `Crawling`, `Swimming`, `Climbing`, `Rappelling`, and `Falling`.
+  - [x] Do not build all modes until a feature uses them.
+- [x] Extract terrain/stamina/cargo movement calculation out of `systems::player_movement`.
+- [x] Make `systems::player_movement` consume `PlayerIntent` and call the shared resolver.
+- [x] Make `systems::agent_jobs` call the shared resolver or a shared passability/cost helper.
+- [x] Keep failed movement from consuming a turn.
+- [x] Add tests for the resolver itself.
+  - [x] Bounds blocked.
+  - [x] Water blocked.
+  - [x] Grass neutral.
+  - [x] Road restores stamina.
+  - [x] Mud/rock drain stamina.
+  - [x] Cargo load increases negative stamina costs.
 
 Notes for future Codex runs:
 

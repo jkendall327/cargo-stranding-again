@@ -1,6 +1,7 @@
 mod components;
 mod input;
 mod map;
+mod movement;
 mod render;
 mod resources;
 mod systems;
