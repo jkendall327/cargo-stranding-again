@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::*;
-use macroquad::input::KeyCode;
+use macroquad::prelude::*;
 
-use crate::resources::{Direction, MenuAction, PlayerAction};
+use crate::resources::{
+    Direction, GameScreen, InputRepeat, MenuAction, MenuInputState, PlayerAction, PlayerIntent,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KeyBinding<T> {
@@ -68,4 +70,62 @@ impl Default for KeyBindings {
             ],
         }
     }
+}
+
+pub fn copy_to_ecs(world: &mut World) {
+    let game_screen = *world.resource::<GameScreen>();
+    let menu_action = current_menu_action(game_screen, world.resource::<KeyBindings>());
+    *world.resource_mut::<MenuInputState>() = MenuInputState {
+        action: menu_action,
+    };
+
+    if game_screen.allows_simulation() && menu_action.is_none() {
+        let keybindings = world.resource::<KeyBindings>();
+        let held_action = current_held_action(keybindings);
+        let newly_pressed_action = current_pressed_action(keybindings);
+        let action = world.resource_mut::<InputRepeat>().action_for_frame(
+            held_action,
+            newly_pressed_action,
+            get_time(),
+        );
+
+        *world.resource_mut::<PlayerIntent>() = PlayerIntent { action };
+    } else {
+        world.resource_mut::<InputRepeat>().reset();
+        *world.resource_mut::<PlayerIntent>() = PlayerIntent::default();
+    }
+}
+
+fn current_menu_action(game_screen: GameScreen, keybindings: &KeyBindings) -> Option<MenuAction> {
+    let action = pressed_action(&keybindings.menu)?;
+    if action == MenuAction::Cancel {
+        return Some(action);
+    }
+
+    match game_screen {
+        GameScreen::Playing | GameScreen::OptionsMenu => None,
+        GameScreen::PauseMenu => Some(action),
+    }
+}
+
+fn current_held_action(keybindings: &KeyBindings) -> Option<PlayerAction> {
+    held_action(&keybindings.gameplay)
+}
+
+fn current_pressed_action(keybindings: &KeyBindings) -> Option<PlayerAction> {
+    pressed_action(&keybindings.gameplay)
+}
+
+fn held_action<T: Copy>(bindings: &[KeyBinding<T>]) -> Option<T> {
+    bindings
+        .iter()
+        .find(|binding| binding.keys.iter().copied().any(is_key_down))
+        .map(|binding| binding.action)
+}
+
+fn pressed_action<T: Copy>(bindings: &[KeyBinding<T>]) -> Option<T> {
+    bindings
+        .iter()
+        .find(|binding| binding.keys.iter().copied().any(is_key_pressed))
+        .map(|binding| binding.action)
 }
