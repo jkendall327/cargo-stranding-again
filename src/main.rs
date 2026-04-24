@@ -1,18 +1,20 @@
 mod components;
+mod input;
 mod map;
 mod render;
 mod resources;
 mod systems;
 
 use bevy_ecs::prelude::*;
+use input::{KeyBinding, KeyBindings};
 use macroquad::prelude::*;
 
 use components::*;
 use map::Map;
 use render::window_conf;
 use resources::{
-    Camera, Direction, GameScreen, InputRepeat, MenuAction, MenuInputState, PauseMenuState,
-    PlayerAction, PlayerIntent, SimulationClock, TurnState,
+    Camera, GameScreen, InputRepeat, MenuAction, MenuInputState, PauseMenuState, PlayerAction,
+    PlayerIntent, SimulationClock, TurnState,
 };
 
 #[macroquad::main(window_conf)]
@@ -65,6 +67,7 @@ fn init_world(world: &mut World) {
     world.insert_resource(PlayerIntent::default());
     world.insert_resource(MenuInputState::default());
     world.insert_resource(InputRepeat::default());
+    world.insert_resource(KeyBindings::default());
     world.insert_resource(PauseMenuState::default());
     world.insert_resource(TurnState::default());
     world.insert_resource(Camera::default());
@@ -121,14 +124,15 @@ fn init_world(world: &mut World) {
 
 fn copy_input_to_ecs(world: &mut World) {
     let game_screen = *world.resource::<GameScreen>();
-    let menu_action = current_menu_action(game_screen);
+    let menu_action = current_menu_action(game_screen, world.resource::<KeyBindings>());
     *world.resource_mut::<MenuInputState>() = MenuInputState {
         action: menu_action,
     };
 
     if game_screen.allows_simulation() && menu_action.is_none() {
-        let held_action = current_held_action();
-        let newly_pressed_action = current_pressed_action();
+        let keybindings = world.resource::<KeyBindings>();
+        let held_action = current_held_action(keybindings);
+        let newly_pressed_action = current_pressed_action(keybindings);
         let action = world.resource_mut::<InputRepeat>().action_for_frame(
             held_action,
             newly_pressed_action,
@@ -142,56 +146,36 @@ fn copy_input_to_ecs(world: &mut World) {
     }
 }
 
-fn current_menu_action(game_screen: GameScreen) -> Option<MenuAction> {
-    if is_key_pressed(KeyCode::Escape) {
-        Some(MenuAction::Cancel)
-    } else {
-        match game_screen {
-            GameScreen::Playing => None,
-            GameScreen::PauseMenu => {
-                if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
-                    Some(MenuAction::MoveSelectionUp)
-                } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
-                    Some(MenuAction::MoveSelectionDown)
-                } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) {
-                    Some(MenuAction::Confirm)
-                } else {
-                    None
-                }
-            }
-            GameScreen::OptionsMenu => None,
-        }
+fn current_menu_action(game_screen: GameScreen, keybindings: &KeyBindings) -> Option<MenuAction> {
+    let action = pressed_action(&keybindings.menu)?;
+    if action == MenuAction::Cancel {
+        return Some(action);
+    }
+
+    match game_screen {
+        GameScreen::Playing | GameScreen::OptionsMenu => None,
+        GameScreen::PauseMenu => Some(action),
     }
 }
 
-fn current_held_action() -> Option<PlayerAction> {
-    if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
-        Some(PlayerAction::Move(Direction::West))
-    } else if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
-        Some(PlayerAction::Move(Direction::East))
-    } else if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
-        Some(PlayerAction::Move(Direction::North))
-    } else if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
-        Some(PlayerAction::Move(Direction::South))
-    } else if is_key_down(KeyCode::Space) || is_key_down(KeyCode::Period) {
-        Some(PlayerAction::Wait)
-    } else {
-        None
-    }
+fn current_held_action(keybindings: &KeyBindings) -> Option<PlayerAction> {
+    held_action(&keybindings.gameplay)
 }
 
-fn current_pressed_action() -> Option<PlayerAction> {
-    if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
-        Some(PlayerAction::Move(Direction::West))
-    } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
-        Some(PlayerAction::Move(Direction::East))
-    } else if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
-        Some(PlayerAction::Move(Direction::North))
-    } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
-        Some(PlayerAction::Move(Direction::South))
-    } else if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Period) {
-        Some(PlayerAction::Wait)
-    } else {
-        None
-    }
+fn current_pressed_action(keybindings: &KeyBindings) -> Option<PlayerAction> {
+    pressed_action(&keybindings.gameplay)
+}
+
+fn held_action<T: Copy>(bindings: &[KeyBinding<T>]) -> Option<T> {
+    bindings
+        .iter()
+        .find(|binding| binding.keys.iter().copied().any(is_key_down))
+        .map(|binding| binding.action)
+}
+
+fn pressed_action<T: Copy>(bindings: &[KeyBinding<T>]) -> Option<T> {
+    bindings
+        .iter()
+        .find(|binding| binding.keys.iter().copied().any(is_key_pressed))
+        .map(|binding| binding.action)
 }
