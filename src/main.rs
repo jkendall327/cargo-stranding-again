@@ -11,8 +11,8 @@ use components::*;
 use map::Map;
 use render::window_conf;
 use resources::{
-    Camera, GameScreen, InputAction, InputRepeat, InputState, MenuAction, MenuInputState,
-    PauseMenuState, SimulationClock, TurnState,
+    Camera, Direction, GameScreen, InputRepeat, MenuAction, MenuInputState, PauseMenuState,
+    PlayerAction, PlayerIntent, SimulationClock, TurnState,
 };
 
 #[macroquad::main(window_conf)]
@@ -44,7 +44,7 @@ async fn main() {
         // player action is resolved, then NPC jobs and the clock advance only
         // if that action actually consumed a turn.
         if world.resource::<GameScreen>().allows_simulation()
-            && world.resource::<InputState>().has_action()
+            && world.resource::<PlayerIntent>().has_action()
         {
             player_schedule.run(&mut world);
             if world.resource::<TurnState>().consumed {
@@ -62,7 +62,7 @@ async fn main() {
 fn init_world(world: &mut World) {
     world.insert_resource(Map::generate());
     world.insert_resource(GameScreen::default());
-    world.insert_resource(InputState::default());
+    world.insert_resource(PlayerIntent::default());
     world.insert_resource(MenuInputState::default());
     world.insert_resource(InputRepeat::default());
     world.insert_resource(PauseMenuState::default());
@@ -135,11 +135,10 @@ fn copy_input_to_ecs(world: &mut World) {
             get_time(),
         );
 
-        *world.resource_mut::<InputState>() =
-            action.map(InputAction::to_input_state).unwrap_or_default();
+        *world.resource_mut::<PlayerIntent>() = PlayerIntent { action };
     } else {
         world.resource_mut::<InputRepeat>().reset();
-        *world.resource_mut::<InputState>() = InputState::default();
+        *world.resource_mut::<PlayerIntent>() = PlayerIntent::default();
     }
 }
 
@@ -165,33 +164,33 @@ fn current_menu_action(game_screen: GameScreen) -> Option<MenuAction> {
     }
 }
 
-fn current_held_action() -> Option<InputAction> {
+fn current_held_action() -> Option<PlayerAction> {
     if is_key_down(KeyCode::Left) || is_key_down(KeyCode::A) {
-        Some(InputAction::MoveLeft)
+        Some(PlayerAction::Move(Direction::West))
     } else if is_key_down(KeyCode::Right) || is_key_down(KeyCode::D) {
-        Some(InputAction::MoveRight)
+        Some(PlayerAction::Move(Direction::East))
     } else if is_key_down(KeyCode::Up) || is_key_down(KeyCode::W) {
-        Some(InputAction::MoveUp)
+        Some(PlayerAction::Move(Direction::North))
     } else if is_key_down(KeyCode::Down) || is_key_down(KeyCode::S) {
-        Some(InputAction::MoveDown)
+        Some(PlayerAction::Move(Direction::South))
     } else if is_key_down(KeyCode::Space) || is_key_down(KeyCode::Period) {
-        Some(InputAction::Wait)
+        Some(PlayerAction::Wait)
     } else {
         None
     }
 }
 
-fn current_pressed_action() -> Option<InputAction> {
+fn current_pressed_action() -> Option<PlayerAction> {
     if is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::A) {
-        Some(InputAction::MoveLeft)
+        Some(PlayerAction::Move(Direction::West))
     } else if is_key_pressed(KeyCode::Right) || is_key_pressed(KeyCode::D) {
-        Some(InputAction::MoveRight)
+        Some(PlayerAction::Move(Direction::East))
     } else if is_key_pressed(KeyCode::Up) || is_key_pressed(KeyCode::W) {
-        Some(InputAction::MoveUp)
+        Some(PlayerAction::Move(Direction::North))
     } else if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
-        Some(InputAction::MoveDown)
+        Some(PlayerAction::Move(Direction::South))
     } else if is_key_pressed(KeyCode::Space) || is_key_pressed(KeyCode::Period) {
-        Some(InputAction::Wait)
+        Some(PlayerAction::Wait)
     } else {
         None
     }

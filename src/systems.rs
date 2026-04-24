@@ -3,8 +3,8 @@ use bevy_ecs::prelude::*;
 use crate::components::*;
 use crate::map::Map;
 use crate::resources::{
-    GameScreen, InputState, MenuAction, MenuInputState, PauseMenuEntry, PauseMenuState,
-    SimulationClock, TurnState,
+    GameScreen, MenuAction, MenuInputState, PauseMenuEntry, PauseMenuState, PlayerAction,
+    PlayerIntent, SimulationClock, TurnState,
 };
 
 type AgentJobItem<'a> = (
@@ -62,7 +62,7 @@ pub fn menu_navigation(
 }
 
 pub fn player_movement(
-    input: Res<InputState>,
+    intent: Res<PlayerIntent>,
     map: Res<Map>,
     mut turn: ResMut<TurnState>,
     mut query: Query<(&mut Position, &mut Velocity, &mut Stamina, &Cargo), With<Player>>,
@@ -77,14 +77,22 @@ pub fn player_movement(
     velocity.dx = 0;
     velocity.dy = 0;
 
-    if input.wait {
+    let Some(action) = intent.action else {
+        return;
+    };
+
+    if action == PlayerAction::Wait {
         stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
         turn.consumed = true;
         return;
     }
 
-    let next_x = position.x + input.move_x;
-    let next_y = position.y + input.move_y;
+    let PlayerAction::Move(direction) = action else {
+        return;
+    };
+    let (move_x, move_y) = direction.delta();
+    let next_x = position.x + move_x;
+    let next_y = position.y + move_y;
     let Some(terrain) = map.terrain_at(next_x, next_y) else {
         return;
     };
@@ -104,8 +112,8 @@ pub fn player_movement(
 
     position.x = next_x;
     position.y = next_y;
-    velocity.dx = input.move_x;
-    velocity.dy = input.move_y;
+    velocity.dx = move_x;
+    velocity.dy = move_y;
     stamina.current = (stamina.current + stamina_delta).clamp(0.0, stamina.max);
     turn.consumed = true;
 }
@@ -236,6 +244,7 @@ fn step_delay(map: &Map, x: i32, y: i32) -> u32 {
 mod tests {
     use super::*;
     use crate::map::Terrain;
+    use crate::resources::Direction;
 
     fn spawn_test_agent(world: &mut World, id: usize, position: Position) {
         world.spawn((
@@ -304,10 +313,15 @@ mod tests {
         let dy = target.y - start.y;
         assert!(dx.abs() + dy.abs() == 1);
 
-        world.insert_resource(InputState {
-            move_x: dx,
-            move_y: dy,
-            wait: false,
+        let direction = match (dx, dy) {
+            (-1, 0) => Direction::West,
+            (1, 0) => Direction::East,
+            (0, -1) => Direction::North,
+            (0, 1) => Direction::South,
+            _ => unreachable!("test movement should be cardinal"),
+        };
+        world.insert_resource(PlayerIntent {
+            action: Some(PlayerAction::Move(direction)),
         });
         world.insert_resource(TurnState::default());
         spawn_test_player(world, start, stamina);
@@ -321,10 +335,8 @@ mod tests {
     fn failed_player_movement_does_not_consume_turn() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(InputState {
-            move_x: -1,
-            move_y: 0,
-            wait: false,
+        world.insert_resource(PlayerIntent {
+            action: Some(PlayerAction::Move(Direction::West)),
         });
         world.insert_resource(TurnState { consumed: true });
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
@@ -391,10 +403,8 @@ mod tests {
     fn wait_consumes_turn_and_recovers_stamina() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(InputState {
-            move_x: 0,
-            move_y: 0,
-            wait: true,
+        world.insert_resource(PlayerIntent {
+            action: Some(PlayerAction::Wait),
         });
         world.insert_resource(TurnState::default());
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 10.0);

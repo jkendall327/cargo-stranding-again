@@ -21,39 +21,28 @@ impl GameScreen {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InputAction {
-    MoveLeft,
-    MoveRight,
-    MoveUp,
-    MoveDown,
-    Wait,
+pub enum Direction {
+    West,
+    East,
+    North,
+    South,
 }
 
-impl InputAction {
-    pub fn to_input_state(self) -> InputState {
+impl Direction {
+    pub fn delta(self) -> (i32, i32) {
         match self {
-            Self::MoveLeft => InputState {
-                move_x: -1,
-                ..Default::default()
-            },
-            Self::MoveRight => InputState {
-                move_x: 1,
-                ..Default::default()
-            },
-            Self::MoveUp => InputState {
-                move_y: -1,
-                ..Default::default()
-            },
-            Self::MoveDown => InputState {
-                move_y: 1,
-                ..Default::default()
-            },
-            Self::Wait => InputState {
-                wait: true,
-                ..Default::default()
-            },
+            Self::West => (-1, 0),
+            Self::East => (1, 0),
+            Self::North => (0, -1),
+            Self::South => (0, 1),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlayerAction {
+    Move(Direction),
+    Wait,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,7 +97,7 @@ pub struct MenuInputState {
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct InputRepeat {
-    held_action: Option<InputAction>,
+    held_action: Option<PlayerAction>,
     next_repeat_at: f64,
 }
 
@@ -119,10 +108,10 @@ impl InputRepeat {
 
     pub fn action_for_frame(
         &mut self,
-        held_action: Option<InputAction>,
-        newly_pressed_action: Option<InputAction>,
+        held_action: Option<PlayerAction>,
+        newly_pressed_action: Option<PlayerAction>,
         now: f64,
-    ) -> Option<InputAction> {
+    ) -> Option<PlayerAction> {
         let Some(action) = held_action else {
             self.held_action = None;
             return None;
@@ -144,15 +133,13 @@ impl InputRepeat {
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
-pub struct InputState {
-    pub move_x: i32,
-    pub move_y: i32,
-    pub wait: bool,
+pub struct PlayerIntent {
+    pub action: Option<PlayerAction>,
 }
 
-impl InputState {
+impl PlayerIntent {
     pub fn has_action(self) -> bool {
-        self.wait || self.move_x != 0 || self.move_y != 0
+        self.action.is_some()
     }
 }
 
@@ -251,24 +238,32 @@ mod tests {
         let mut repeat = InputRepeat::default();
 
         assert_eq!(
-            repeat.action_for_frame(Some(InputAction::MoveUp), Some(InputAction::MoveUp), 0.0),
-            Some(InputAction::MoveUp)
+            repeat.action_for_frame(
+                Some(PlayerAction::Move(Direction::North)),
+                Some(PlayerAction::Move(Direction::North)),
+                0.0
+            ),
+            Some(PlayerAction::Move(Direction::North))
         );
         assert_eq!(
-            repeat.action_for_frame(Some(InputAction::MoveUp), None, 0.1),
+            repeat.action_for_frame(Some(PlayerAction::Move(Direction::North)), None, 0.1),
             None
         );
         assert_eq!(
-            repeat.action_for_frame(Some(InputAction::MoveUp), None, INPUT_REPEAT_INITIAL_DELAY),
-            Some(InputAction::MoveUp)
+            repeat.action_for_frame(
+                Some(PlayerAction::Move(Direction::North)),
+                None,
+                INPUT_REPEAT_INITIAL_DELAY
+            ),
+            Some(PlayerAction::Move(Direction::North))
         );
         assert_eq!(
             repeat.action_for_frame(
-                Some(InputAction::MoveUp),
+                Some(PlayerAction::Move(Direction::North)),
                 None,
                 INPUT_REPEAT_INITIAL_DELAY + INPUT_REPEAT_INTERVAL
             ),
-            Some(InputAction::MoveUp)
+            Some(PlayerAction::Move(Direction::North))
         );
     }
 
@@ -277,13 +272,13 @@ mod tests {
         let mut repeat = InputRepeat::default();
 
         assert_eq!(
-            repeat.action_for_frame(Some(InputAction::Wait), Some(InputAction::Wait), 0.0),
-            Some(InputAction::Wait)
+            repeat.action_for_frame(Some(PlayerAction::Wait), Some(PlayerAction::Wait), 0.0),
+            Some(PlayerAction::Wait)
         );
         assert_eq!(repeat.action_for_frame(None, None, 0.05), None);
         assert_eq!(
-            repeat.action_for_frame(Some(InputAction::Wait), Some(InputAction::Wait), 0.06),
-            Some(InputAction::Wait)
+            repeat.action_for_frame(Some(PlayerAction::Wait), Some(PlayerAction::Wait), 0.06),
+            Some(PlayerAction::Wait)
         );
     }
 }
