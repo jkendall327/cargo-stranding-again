@@ -18,6 +18,12 @@ pub struct Game {
     menu_schedule: Schedule,
 }
 
+impl Default for Game {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Game {
     pub fn new() -> Self {
         let mut world = World::new();
@@ -64,7 +70,7 @@ impl Game {
     }
 }
 
-fn init_world(world: &mut World) {
+pub(crate) fn init_world(world: &mut World) {
     world.insert_resource(Map::generate());
     world.insert_resource(GameScreen::default());
     world.insert_resource(PlayerIntent::default());
