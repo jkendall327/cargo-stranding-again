@@ -15,7 +15,7 @@ use cargo_stranding_again::{
 const DEFAULT_SCENARIO_DIR: &str = "scenarios/headless";
 
 fn main() -> ExitCode {
-    logging::init();
+    logging::init_headless();
 
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() {

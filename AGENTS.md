@@ -29,6 +29,8 @@ Run all JSON smoke scenarios:
 cargo run --bin headless -- all
 ```
 
+Headless logs are quiet by default. Set `RUST_LOG` when you need tracing output.
+
 Run one scenario file:
 
 ```sh
