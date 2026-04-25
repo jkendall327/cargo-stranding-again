@@ -1,15 +1,21 @@
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
+
+mod cargo;
+mod movement;
 
 use crate::components::*;
 use crate::energy::{ActionEnergy, ITEM_ACTION_ENERGY_COST, WAIT_ENERGY_COST};
 use crate::map::Map;
-use crate::momentum::{movement_effect, wait_momentum};
-use crate::movement::{
-    resolve_movement, CargoLoad, MovementOutcome, MovementRequest, StaminaBudget,
-};
+use crate::momentum::wait_momentum;
 use crate::resources::{
     CargoLossRisk, EnergyTimeline, GameScreen, InventoryMenuState, PlayerAction, PlayerIntent,
 };
+
+pub use cargo::{reset_cargo_loss_risk, resolve_cargo_loss_risk};
+
+use self::cargo::{carried_parcel_count, pick_up_loose_parcel};
+use self::movement::{try_move_player, PlayerMovement};
 
 type PlayerActionItem<'a> = (
     Entity,
@@ -22,21 +28,26 @@ type PlayerActionItem<'a> = (
     &'a mut ActionEnergy,
 );
 
+type PlayerParcelItem<'a> = (Entity, &'a Position, &'a CargoParcel, &'a mut ParcelState);
+
+#[derive(SystemParam)]
+pub struct PlayerActionParams<'w, 's> {
+    intent: Res<'w, PlayerIntent>,
+    timeline: Res<'w, EnergyTimeline>,
+    map: Res<'w, Map>,
+    screen: ResMut<'w, GameScreen>,
+    inventory_menu: ResMut<'w, InventoryMenuState>,
+    cargo_loss_risk: ResMut<'w, CargoLossRisk>,
+    player: Query<'w, 's, PlayerActionItem<'static>, With<Player>>,
+    parcels: Query<'w, 's, PlayerParcelItem<'static>, Without<Player>>,
+}
+
 const WAIT_STAMINA_RECOVERY: f32 = 3.0;
 
-pub fn player_actions(
-    intent: Res<PlayerIntent>,
-    timeline: Res<EnergyTimeline>,
-    map: Res<Map>,
-    mut screen: ResMut<GameScreen>,
-    mut inventory_menu: ResMut<InventoryMenuState>,
-    mut cargo_loss_risk: ResMut<CargoLossRisk>,
-    mut player_query: Query<PlayerActionItem, With<Player>>,
-    mut parcels: Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
-) {
-    let now = timeline.now;
+pub fn player_actions(mut params: PlayerActionParams) {
+    let now = params.timeline.now;
 
-    let map = &*map;
+    let map = &*params.map;
     let Ok((
         entity,
         mut position,
@@ -46,7 +57,7 @@ pub fn player_actions(
         mut movement_state,
         mut momentum,
         mut energy,
-    )) = player_query.single_mut()
+    )) = params.player.single_mut()
     else {
         return;
     };
@@ -58,16 +69,16 @@ pub fn player_actions(
     velocity.dx = 0;
     velocity.dy = 0;
 
-    let Some(action) = intent.action else {
+    let Some(action) = params.intent.action else {
         return;
     };
 
     tracing::debug!(?action, now, "processing player action");
 
     if action == PlayerAction::OpenInventory {
-        let carried_count = carried_parcel_count(entity, &parcels);
-        inventory_menu.clamp_to_item_count(carried_count);
-        *screen = GameScreen::InventoryMenu;
+        let carried_count = carried_parcel_count(entity, &params.parcels);
+        params.inventory_menu.clamp_to_item_count(carried_count);
+        *params.screen = GameScreen::InventoryMenu;
         tracing::debug!(carried_count, "opened inventory");
         return;
     }
@@ -87,55 +98,25 @@ pub fn player_actions(
 
     match action {
         PlayerAction::Move(direction) => {
-            let mut request = MovementRequest::new(*position, direction, movement_state.mode);
-            request.entity = Some(entity);
-            request.stamina = Some(StaminaBudget {
-                current: stamina.current,
-                max: stamina.max,
-            });
-            request.cargo = CargoLoad {
-                current_weight: cargo.current_weight,
-                max_weight: cargo.max_weight,
-            };
-
-            let outcome = resolve_movement(map, request);
-            let result = outcome.result();
-            if matches!(outcome, MovementOutcome::Moved(_)) {
-                let momentum_effect =
-                    movement_effect((*momentum).into(), direction, movement_state.mode);
-                let energy_cost =
-                    apply_energy_multiplier(result.energy_cost, momentum_effect.energy_multiplier);
-                let stamina_delta = result.stamina_delta + momentum_effect.stamina_delta;
-
-                position.x = result.target.x;
-                position.y = result.target.y;
-                velocity.dx = result.actual_delta.0;
-                velocity.dy = result.actual_delta.1;
-                stamina.current = (stamina.current + stamina_delta).clamp(0.0, stamina.max);
-                *momentum = momentum_effect.momentum.into();
-                cargo_loss_risk.add(momentum_effect.cargo_loss_risk);
-                energy.spend(now, energy_cost);
-                tracing::debug!(
-                    x = position.x,
-                    y = position.y,
-                    terrain = ?result.terrain,
-                    energy_cost,
-                    stamina = stamina.current,
-                    momentum = momentum.amount,
-                    cargo_loss_risk = momentum_effect.cargo_loss_risk,
-                    "player moved"
-                );
-            } else {
-                tracing::debug!(
-                    outcome = ?outcome,
-                    target_x = result.target.x,
-                    target_y = result.target.y,
-                    "player movement did not resolve"
-                );
-            }
+            try_move_player(
+                PlayerMovement {
+                    entity,
+                    position: &mut position,
+                    velocity: &mut velocity,
+                    stamina: &mut stamina,
+                    cargo: &cargo,
+                    movement_state: &movement_state,
+                    momentum: &mut momentum,
+                    energy: &mut energy,
+                },
+                direction,
+                map,
+                &params.timeline,
+                &mut params.cargo_loss_risk,
+            );
         }
         PlayerAction::PickUp => {
-            if pick_up_loose_parcel(entity, *position, &mut cargo, &mut parcels) {
+            if pick_up_loose_parcel(entity, *position, &mut cargo, &mut params.parcels) {
                 energy.spend(now, ITEM_ACTION_ENERGY_COST);
                 tracing::info!(
                     x = position.x,
@@ -161,83 +142,6 @@ pub fn player_actions(
         PlayerAction::OpenInventory => {}
         PlayerAction::Wait => {}
     }
-}
-
-pub fn reset_cargo_loss_risk(mut cargo_loss_risk: ResMut<CargoLossRisk>) {
-    cargo_loss_risk.reset();
-}
-
-pub fn resolve_cargo_loss_risk(
-    cargo_loss_risk: Res<CargoLossRisk>,
-    mut player_query: Query<(Entity, &Position, &mut Cargo), With<Player>>,
-    mut parcels: Query<(&mut Position, &mut ParcelState), (With<CargoParcel>, Without<Player>)>,
-) {
-    if !cargo_loss_risk.crosses_threshold() {
-        return;
-    }
-
-    let Ok((player_entity, player_position, mut cargo)) = player_query.single_mut() else {
-        return;
-    };
-
-    let mut dropped = 0;
-    for (mut parcel_position, mut parcel_state) in &mut parcels {
-        if *parcel_state != ParcelState::CarriedBy(player_entity) {
-            continue;
-        }
-
-        *parcel_position = *player_position;
-        *parcel_state = ParcelState::Loose;
-        dropped += 1;
-    }
-
-    if dropped > 0 || cargo.current_weight > 0.0 {
-        cargo.current_weight = 0.0;
-        tracing::info!(
-            dropped,
-            risk = cargo_loss_risk.amount,
-            x = player_position.x,
-            y = player_position.y,
-            "player cargo spilled from accumulated action risk"
-        );
-    }
-}
-
-fn apply_energy_multiplier(base: u32, multiplier: f32) -> u32 {
-    ((base as f32) * multiplier).round().max(1.0) as u32
-}
-
-fn carried_parcel_count(
-    holder: Entity,
-    parcels: &Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
-) -> usize {
-    parcels
-        .iter()
-        .filter(|(_, _, _, state)| **state == ParcelState::CarriedBy(holder))
-        .count()
-}
-
-fn pick_up_loose_parcel(
-    holder: Entity,
-    holder_position: Position,
-    cargo: &mut Cargo,
-    parcels: &mut Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
-) -> bool {
-    for (_parcel_entity, parcel_position, parcel, mut parcel_state) in parcels.iter_mut() {
-        if *parcel_state != ParcelState::Loose || *parcel_position != holder_position {
-            continue;
-        }
-
-        if cargo.current_weight + parcel.weight > cargo.max_weight {
-            return false;
-        }
-
-        *parcel_state = ParcelState::CarriedBy(holder);
-        cargo.current_weight += parcel.weight;
-        return true;
-    }
-
-    false
 }
 
 #[cfg(test)]

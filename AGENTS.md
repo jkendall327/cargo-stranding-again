@@ -10,6 +10,7 @@ If I mentioned numbers like '#3' I'm referring to stuff here.
 
 - `cargo fmt --check`
 - `cargo check`
+- `cargo clippy`
 - `cargo test`
 - `cargo run`
 - `cargo run --bin headless -- <commands>`
