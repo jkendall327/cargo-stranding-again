@@ -1,12 +1,10 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{ActionEnergy, Cargo, CargoParcel, ParcelState, Player, Position};
-use crate::energy::ITEM_ACTION_ENERGY_COST;
+use crate::components::{CargoParcel, ParcelState, Player};
 use crate::resources::{
-    EnergyTimeline, GameScreen, InventoryMenuState, MenuAction, MenuInputState, PauseMenuEntry,
-    PauseMenuState,
+    GameScreen, InventoryAction, InventoryIntent, InventoryMenuState, MenuAction, MenuInputState,
+    PauseMenuEntry, PauseMenuState,
 };
-use crate::systems::timeline::advance_after_player_action_spent;
 
 pub fn menu_navigation(world: &mut World) {
     let Some(action) = world.resource::<MenuInputState>().action else {
@@ -53,95 +51,22 @@ pub fn menu_navigation(world: &mut World) {
                 .select_next(item_count);
         }
         (GameScreen::InventoryMenu, MenuAction::Confirm) => {
-            if drop_selected_inventory_parcel(world) {
-                advance_after_player_action_spent(world);
-            }
+            world.resource_mut::<InventoryIntent>().action = Some(InventoryAction::DropSelected);
         }
         _ => {}
     }
 }
 
-fn drop_selected_inventory_parcel(world: &mut World) -> bool {
-    let Some((player_entity, player_position)) = ready_player(world) else {
-        return false;
-    };
-
-    let parcels = player_carried_parcels_for(world, player_entity);
-    world
-        .resource_mut::<InventoryMenuState>()
-        .clamp_to_item_count(parcels.len());
-
-    let selected_index = world.resource::<InventoryMenuState>().selected_index();
-    let Some(parcel_entity) = parcels.get(selected_index).copied() else {
-        return false;
-    };
-
-    let Some(parcel_weight) = world
-        .get::<CargoParcel>(parcel_entity)
-        .map(|parcel| parcel.weight)
-    else {
-        return false;
-    };
-
-    if let Some(mut parcel_position) = world.get_mut::<Position>(parcel_entity) {
-        *parcel_position = player_position;
-    }
-    if let Some(mut parcel_state) = world.get_mut::<ParcelState>(parcel_entity) {
-        *parcel_state = ParcelState::Loose;
-    }
-
-    let now = world.resource::<EnergyTimeline>().now;
-    let cargo_weight = {
-        let mut player_query =
-            world.query_filtered::<(&mut Cargo, &mut ActionEnergy), With<Player>>();
-        let Some((mut cargo, mut energy)) = player_query.iter_mut(world).next() else {
-            return false;
-        };
-
-        cargo.current_weight = (cargo.current_weight - parcel_weight).max(0.0);
-        energy.spend(now, ITEM_ACTION_ENERGY_COST);
-        cargo.current_weight
-    };
-
-    world
-        .resource_mut::<InventoryMenuState>()
-        .clamp_to_item_count(parcels.len().saturating_sub(1));
-
-    tracing::info!(
-        x = player_position.x,
-        y = player_position.y,
-        cargo = cargo_weight,
-        "player dropped parcel"
-    );
-
-    true
-}
-
-fn ready_player(world: &mut World) -> Option<(Entity, Position)> {
-    let now = world.resource::<EnergyTimeline>().now;
-    let mut player_query =
-        world.query_filtered::<(Entity, &Position, &ActionEnergy), With<Player>>();
-    let (entity, position, energy) = player_query.iter(world).next()?;
-    if energy.is_ready(now) {
-        Some((entity, *position))
-    } else {
-        None
-    }
-}
-
 fn player_carried_parcels(world: &mut World) -> Vec<Entity> {
-    let Some((player_entity, _)) = player_identity(world) else {
+    let Some(player_entity) = player_entity(world) else {
         return Vec::new();
     };
     player_carried_parcels_for(world, player_entity)
 }
 
-fn player_identity(world: &mut World) -> Option<(Entity, Position)> {
-    let mut player_query = world.query_filtered::<(Entity, &Position), With<Player>>();
-    player_query
-        .iter(world)
-        .next()
-        .map(|(entity, position)| (entity, *position))
+fn player_entity(world: &mut World) -> Option<Entity> {
+    let mut player_query = world.query_filtered::<Entity, With<Player>>();
+    player_query.iter(world).next()
 }
 
 fn player_carried_parcels_for(world: &mut World, player_entity: Entity) -> Vec<Entity> {
@@ -163,7 +88,9 @@ fn player_carried_parcels_for(world: &mut World, player_entity: Entity) -> Vec<E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resources::{PlayerIntent, SimulationClock};
+    use crate::components::{ActionEnergy, Cargo, Position};
+    use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
+    use crate::systems::inventory::inventory_actions;
 
     fn spawn_test_player(world: &mut World, position: Position) -> Entity {
         world
@@ -193,9 +120,16 @@ mod tests {
         world.insert_resource(screen);
         world.insert_resource(PauseMenuState::default());
         world.insert_resource(InventoryMenuState::default());
+        world.insert_resource(InventoryIntent::default());
         world.insert_resource(MenuInputState {
             action: Some(action),
         });
+    }
+
+    fn menu_with_inventory_resolution_schedule() -> Schedule {
+        let mut schedule = Schedule::default();
+        schedule.add_systems((menu_navigation, inventory_actions).chain());
+        schedule
     }
 
     #[test]
@@ -203,8 +137,7 @@ mod tests {
         let mut world = World::new();
 
         setup_menu_world(&mut world, GameScreen::Playing, MenuAction::Cancel);
-        let mut schedule = Schedule::default();
-        schedule.add_systems(menu_navigation);
+        let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
         assert_eq!(*world.resource::<GameScreen>(), GameScreen::PauseMenu);
 
@@ -225,8 +158,7 @@ mod tests {
             GameScreen::PauseMenu,
             MenuAction::MoveSelectionDown,
         );
-        let mut schedule = Schedule::default();
-        schedule.add_systems(menu_navigation);
+        let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
         assert_eq!(
             world.resource::<PauseMenuState>().selected(),
@@ -246,8 +178,7 @@ mod tests {
         let mut world = World::new();
         setup_menu_world(&mut world, GameScreen::InventoryMenu, MenuAction::Cancel);
 
-        let mut schedule = Schedule::default();
-        schedule.add_systems(menu_navigation);
+        let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
 
         assert_eq!(*world.resource::<GameScreen>(), GameScreen::Playing);
@@ -265,8 +196,7 @@ mod tests {
         world.insert_resource(PlayerIntent::default());
         spawn_test_player(&mut world, Position { x: 2, y: 2 });
 
-        let mut schedule = Schedule::default();
-        schedule.add_systems(menu_navigation);
+        let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
 
         let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
@@ -290,8 +220,7 @@ mod tests {
         spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
         spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
 
-        let mut schedule = Schedule::default();
-        schedule.add_systems(menu_navigation);
+        let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
         assert_eq!(world.resource::<InventoryMenuState>().selected_index(), 1);
 
@@ -312,8 +241,7 @@ mod tests {
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 });
         let parcel = spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
 
-        let mut schedule = Schedule::default();
-        schedule.add_systems(menu_navigation);
+        let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
 
         assert_eq!(

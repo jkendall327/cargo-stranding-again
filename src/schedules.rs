@@ -10,6 +10,6 @@ pub fn player_intent_schedule() -> Schedule {
 
 pub fn menu_schedule() -> Schedule {
     let mut schedule = Schedule::default();
-    schedule.add_systems(systems::menu_navigation);
+    schedule.add_systems((systems::menu_navigation, systems::inventory_actions).chain());
     schedule
 }

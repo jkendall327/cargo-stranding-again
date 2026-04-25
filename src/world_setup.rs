@@ -5,8 +5,8 @@ use crate::energy::ActionEnergy;
 use crate::input::KeyBindings;
 use crate::map::Map;
 use crate::resources::{
-    Camera, CargoLossRisk, EnergyTimeline, GameScreen, InputRepeat, InventoryMenuState,
-    MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
+    Camera, CargoLossRisk, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
+    InventoryMenuState, MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
 };
 
 pub fn init_world(world: &mut World) {
@@ -20,6 +20,7 @@ pub fn init_world(world: &mut World) {
     world.insert_resource(KeyBindings::default());
     world.insert_resource(PauseMenuState::default());
     world.insert_resource(InventoryMenuState::default());
+    world.insert_resource(InventoryIntent::default());
     world.insert_resource(EnergyTimeline::default());
     world.insert_resource(CargoLossRisk::default());
     world.insert_resource(Camera::default());

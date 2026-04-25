@@ -162,6 +162,16 @@ impl InventoryMenuState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InventoryAction {
+    DropSelected,
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct InventoryIntent {
+    pub action: Option<InventoryAction>,
+}
+
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct MenuInputState {
     pub action: Option<MenuAction>,
