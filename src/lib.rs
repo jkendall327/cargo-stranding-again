@@ -10,5 +10,6 @@ pub mod movement;
 pub mod render;
 pub mod resources;
 pub mod schedules;
+pub mod simulation;
 pub mod systems;
 pub mod world_setup;

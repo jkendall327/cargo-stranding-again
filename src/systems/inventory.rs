@@ -3,7 +3,6 @@ use bevy_ecs::prelude::*;
 use crate::components::{ActionEnergy, Cargo, CargoParcel, ParcelState, Player, Position};
 use crate::energy::ITEM_ACTION_ENERGY_COST;
 use crate::resources::{EnergyTimeline, InventoryAction, InventoryIntent, InventoryMenuState};
-use crate::systems::timeline::advance_after_player_action_spent;
 
 pub fn inventory_actions(world: &mut World) {
     let action = world.resource_mut::<InventoryIntent>().action.take();
@@ -13,9 +12,7 @@ pub fn inventory_actions(world: &mut World) {
 
     match action {
         InventoryAction::DropSelected => {
-            if drop_selected_inventory_parcel(world) {
-                advance_after_player_action_spent(world);
-            }
+            drop_selected_inventory_parcel(world);
         }
     }
 }

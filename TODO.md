@@ -133,6 +133,11 @@ Design decisions:
   - `Energy`: when/how often an actor can act.
   - `Momentum`: body state and stability risk.
   - `MovementState`: chosen posture/effort.
+- Food for thought later: if autonomous wildlife/NPC simulation becomes a larger
+  feature, consider whether the energy timeline should become more ECS-native
+  with first-class ready actor/timeline event phases. For now, keep player input
+  as the pacing boundary and use an explicit simulation runner for the custom
+  timeline orchestration.
 
 Implementation tasks:
 

@@ -90,6 +90,7 @@ mod tests {
     use super::*;
     use crate::components::{ActionEnergy, Cargo, Position};
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
+    use crate::simulation::SimulationRunner;
     use crate::systems::inventory::inventory_actions;
 
     fn spawn_test_player(world: &mut World, position: Position) -> Entity {
@@ -130,6 +131,15 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems((menu_navigation, inventory_actions).chain());
         schedule
+    }
+
+    fn run_menu_with_simulation(
+        schedule: &mut Schedule,
+        simulation: &mut SimulationRunner,
+        world: &mut World,
+    ) {
+        schedule.run(world);
+        simulation.advance_after_player_action_if_spent(world);
     }
 
     #[test]
@@ -242,7 +252,8 @@ mod tests {
         let parcel = spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
 
         let mut schedule = menu_with_inventory_resolution_schedule();
-        schedule.run(&mut world);
+        let mut simulation = SimulationRunner::new();
+        run_menu_with_simulation(&mut schedule, &mut simulation, &mut world);
 
         assert_eq!(
             *world

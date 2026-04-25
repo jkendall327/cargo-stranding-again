@@ -8,12 +8,12 @@ use crate::map::Map;
 use crate::resources::{
     Camera, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
 };
-use crate::schedules;
+use crate::simulation::SimulationRunner;
 use crate::world_setup::init_world;
 
 pub struct HeadlessGame {
     world: World,
-    player_schedule: Schedule,
+    simulation: SimulationRunner,
 }
 
 impl HeadlessGame {
@@ -21,14 +21,11 @@ impl HeadlessGame {
         let mut world = World::new();
         init_world(&mut world);
 
-        let player_schedule = schedules::player_intent_schedule();
+        let simulation = SimulationRunner::new();
 
         tracing::debug!("created headless game");
 
-        Self {
-            world,
-            player_schedule,
-        }
+        Self { world, simulation }
     }
 
     pub fn step(&mut self, action: PlayerAction) {
@@ -39,7 +36,7 @@ impl HeadlessGame {
         };
 
         if self.world.resource::<GameScreen>().allows_simulation() {
-            self.player_schedule.run(&mut self.world);
+            self.simulation.run_player_intent(&mut self.world);
         }
 
         *self.world.resource_mut::<PlayerIntent>() = PlayerIntent::default();

@@ -4,11 +4,12 @@ use macroquad::prelude::*;
 use crate::render;
 use crate::resources::{GameScreen, PlayerIntent};
 use crate::schedules;
+use crate::simulation::SimulationRunner;
 use crate::world_setup::init_world;
 
 pub struct Game {
     world: World,
-    player_schedule: Schedule,
+    simulation: SimulationRunner,
     menu_schedule: Schedule,
 }
 
@@ -23,14 +24,14 @@ impl Game {
         let mut world = World::new();
         init_world(&mut world);
 
-        let player_schedule = schedules::player_intent_schedule();
         let menu_schedule = schedules::menu_schedule();
+        let simulation = SimulationRunner::new();
 
         tracing::debug!("created game schedules");
 
         Self {
             world,
-            player_schedule,
+            simulation,
             menu_schedule,
         }
     }
@@ -47,6 +48,8 @@ impl Game {
         // Each frame we copy only the compact input intent into an ECS resource.
         crate::input::copy_to_ecs(&mut self.world);
         self.menu_schedule.run(&mut self.world);
+        self.simulation
+            .advance_after_player_action_if_spent(&mut self.world);
 
         // Bevy ECS owns simulation state. The energy timeline stays
         // input-paced for now: player input advances time, and NPCs catch up
@@ -54,7 +57,7 @@ impl Game {
         if self.world.resource::<GameScreen>().allows_simulation()
             && self.world.resource::<PlayerIntent>().has_action()
         {
-            self.player_schedule.run(&mut self.world);
+            self.simulation.run_player_intent(&mut self.world);
         }
 
         // Rendering is deliberately a plain Macroquad function that manually
