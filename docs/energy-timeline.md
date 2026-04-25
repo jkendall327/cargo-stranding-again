@@ -66,34 +66,34 @@ This means the player remains the pacing boundary, but NPCs do not simply get
 "one turn per player turn." They act according to their own `ActionEnergy`
 timestamps during the time that elapses between player-ready moments.
 
-## Agent Catch-Up
+## Autonomous Actor Catch-Up
 
-Agent catch-up is coordinated in `src/systems/timeline.rs`.
+Autonomous actor catch-up is coordinated in `src/systems/timeline.rs`.
 
-The timeline asks for the next actionable agent ready time up to the player's
-next ready timestamp:
+The timeline asks for the next autonomous actor that both wants action and is
+ready up to the player's next ready timestamp:
 
 ```text
-next_ready_at = minimum actionable agent ready_at <= player_ready_at
+next_ready_at = minimum ready_at for an AutonomousActor with WantsAction <= player_ready_at
 ```
 
-Then it advances `EnergyTimeline.now` to that timestamp and runs the agent
-schedule once. This repeats until no actionable agent is ready before the player
-is ready.
+Then it advances `EnergyTimeline.now` to that timestamp and runs the autonomous
+actor schedule once. This repeats until no autonomous actor wants action before
+the player is ready.
 
 At the end, `EnergyTimeline.now` is set to the player's `ready_at` timestamp.
 That keeps the player action code simple: if input is being resolved, the player
 should already be ready.
 
-## Agent Actions
+## Porter Actions
 
 `src/systems/agents.rs` intentionally does not own the catch-up loop.
 
-`agent_jobs` loops over agents and lets each ready agent perform at most one job
-action at the current `EnergyTimeline.now`:
+`porter_jobs` loops over porters and lets each ready porter perform at most one
+job action at the current `EnergyTimeline.now`:
 
 ```text
-for each agent:
+for each porter:
     if not ready at now:
         skip
 
@@ -110,16 +110,16 @@ One job action means one of these:
 - deliver a carried parcel
 - spend a default action cost when blocked
 
-This is important. Agents used to contain an internal catch-up loop with a
-fixed upper bound. That made the agent system both "agent behavior" and
-"scheduler." Now the timeline owns scheduling, and the agent system only answers
-"what does a ready agent do at this timestamp?"
+This is important. Porters used to contain an internal catch-up loop with a
+fixed upper bound. That made the porter system both "porter behavior" and
+"scheduler." Now the timeline owns scheduling, and the porter system only
+answers "what does a ready porter do at this timestamp?"
 
 ## Same-Timestamp Batching
 
-The current scheduler uses a simple batch rule: when several agents are ready at
-the same timestamp, the agent schedule can process all of them once in the same
-schedule run.
+The current scheduler uses a simple batch rule: when several autonomous actors
+are ready at the same timestamp, the autonomous actor schedule can process all
+of them once in the same schedule run.
 
 For this project, that is the right amount of precision. It keeps the ECS system
 shape simple and deterministic enough for the current porter behavior.
@@ -128,20 +128,24 @@ If exact per-entity tie-breaking becomes important later, the next step would be
 to have the timeline choose one active actor at a time. That would add more
 ceremony, so it is not worth doing until actor order has gameplay consequences.
 
-## Actionable Agents
+## Action Interest
 
-Not every ready agent should cause timeline work.
+Not every ready autonomous actor should cause timeline work.
 
 An idle porter may have an old `ready_at` timestamp, but if there are no loose
 parcels and it has no active job, it has nothing useful to do. The timeline
-therefore looks for actionable agents, not merely ready agents.
+therefore looks for autonomous actors with `WantsAction`, not merely ready
+actors.
 
-An agent is currently actionable if:
+A porter currently wants action if:
 
 - there is a loose parcel it could be assigned, or
 - it already has an active parcel job that is not `FindParcel` or `Done`
 
-This prevents idle agents from creating empty catch-up loops.
+This prevents idle porters from creating empty catch-up loops. Other actor
+families, such as wildlife or monsters, should maintain their own `WantsAction`
+state from their own domain systems rather than adding their behavior details to
+the timeline.
 
 ## Energy Vs Turn Vs Momentum
 
@@ -174,14 +178,14 @@ helpers to advance to the player-ready timestamp before and after player
 actions.
 
 `src/systems/timeline.rs` owns time advancement. It moves
-`EnergyTimeline.now`, runs ready agents until the player is ready, and increments
-the player-facing turn count after successful player actions.
+`EnergyTimeline.now`, runs ready autonomous actors until the player is ready,
+and increments the player-facing turn count after successful player actions.
 
 `src/systems/player.rs` consumes `PlayerIntent`. Successful player actions spend
 the player's `ActionEnergy`.
 
-`src/systems/agents.rs` consumes ready agent jobs. It performs one action per
-ready agent at the current timestamp.
+`src/systems/agents.rs` contains the current porter behavior. It performs one
+action per ready porter at the current timestamp.
 
 `src/energy.rs` defines `ActionEnergy` and the baseline action costs.
 

@@ -7,14 +7,14 @@ use crate::systems::timeline;
 
 pub struct SimulationRunner {
     player_action: Schedule,
-    agents: Schedule,
+    autonomous_actors: Schedule,
 }
 
 impl SimulationRunner {
     pub fn new() -> Self {
         Self {
             player_action: schedules::player_action_phase_schedule(),
-            agents: schedules::agent_phase_schedule(),
+            autonomous_actors: schedules::autonomous_actor_phase_schedule(),
         }
     }
 
@@ -23,7 +23,7 @@ impl SimulationRunner {
             return;
         }
 
-        timeline::advance_to_player_ready(world, &mut self.agents);
+        timeline::advance_to_player_ready(world, &mut self.autonomous_actors);
         stream_chunks_around_player(world);
         self.player_action.run(world);
         stream_chunks_around_player(world);
@@ -32,7 +32,7 @@ impl SimulationRunner {
 
     pub fn advance_after_player_action_if_spent(&mut self, world: &mut World) {
         if timeline::player_spent_action_energy(world) {
-            timeline::advance_after_player_action_spent(world, &mut self.agents);
+            timeline::advance_after_player_action_spent(world, &mut self.autonomous_actors);
         }
     }
 }

@@ -6,7 +6,7 @@ use crate::map::{Map, TileCoord};
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
 use crate::resources::{DeliveryStats, Direction, EnergyTimeline};
 
-type AgentJobItem<'a> = (
+type PorterJobItem<'a> = (
     Entity,
     &'a mut Position,
     &'a mut Velocity,
@@ -15,11 +15,31 @@ type AgentJobItem<'a> = (
     &'a mut ActionEnergy,
 );
 
-pub fn assign_agent_jobs(
-    mut parcels: Query<(Entity, &mut ParcelState), With<CargoParcel>>,
-    mut agents: Query<(Entity, &mut AssignedJob), With<Agent>>,
+pub fn update_porter_action_interest(
+    mut commands: Commands,
+    parcels: Query<&ParcelState, With<CargoParcel>>,
+    porters: Query<(Entity, &AssignedJob), With<Porter>>,
 ) {
-    for (agent_entity, mut job) in &mut agents {
+    let has_loose_parcel = parcels
+        .iter()
+        .any(|state| matches!(*state, ParcelState::Loose));
+
+    for (porter_entity, job) in &porters {
+        let has_active_job =
+            job.parcel.is_some() && !matches!(job.phase, JobPhase::FindParcel | JobPhase::Done);
+        if has_loose_parcel || has_active_job {
+            commands.entity(porter_entity).insert(WantsAction);
+        } else {
+            commands.entity(porter_entity).remove::<WantsAction>();
+        }
+    }
+}
+
+pub fn assign_porter_jobs(
+    mut parcels: Query<(Entity, &mut ParcelState), With<CargoParcel>>,
+    mut porters: Query<(Entity, &mut AssignedJob), With<Porter>>,
+) {
+    for (porter_entity, mut job) in &mut porters {
         if job.parcel.is_some() && job.phase != JobPhase::Done {
             continue;
         }
@@ -28,7 +48,7 @@ pub fn assign_agent_jobs(
             .iter_mut()
             .find(|(_, state)| matches!(**state, ParcelState::Loose))
         {
-            *state = ParcelState::AssignedTo(agent_entity);
+            *state = ParcelState::AssignedTo(porter_entity);
             job.parcel = Some(parcel_entity);
             job.phase = JobPhase::GoToParcel;
         } else {
@@ -38,16 +58,17 @@ pub fn assign_agent_jobs(
     }
 }
 
-pub fn agent_jobs(
+pub fn porter_jobs(
     map: Res<Map>,
     timeline: Res<EnergyTimeline>,
     mut delivery_stats: ResMut<DeliveryStats>,
-    mut agents: Query<AgentJobItem, With<Agent>>,
-    mut parcels: Query<(&Position, &CargoParcel, &mut ParcelState), Without<Agent>>,
+    mut porters: Query<PorterJobItem, (With<Porter>, With<WantsAction>)>,
+    mut parcels: Query<(&Position, &CargoParcel, &mut ParcelState), Without<Porter>>,
 ) {
     let map = &*map;
     let now = timeline.now;
-    for (agent_entity, mut position, mut velocity, mut cargo, mut job, mut energy) in &mut agents {
+    for (porter_entity, mut position, mut velocity, mut cargo, mut job, mut energy) in &mut porters
+    {
         velocity.dx = 0;
         velocity.dy = 0;
 
@@ -67,28 +88,28 @@ pub fn agent_jobs(
         match job.phase {
             JobPhase::FindParcel | JobPhase::Done => {}
             JobPhase::GoToParcel => {
-                if *parcel_state != ParcelState::AssignedTo(agent_entity) {
+                if *parcel_state != ParcelState::AssignedTo(porter_entity) {
                     job.phase = JobPhase::FindParcel;
                     job.parcel = None;
                     continue;
                 }
 
                 if position.x == parcel_position.x && position.y == parcel_position.y {
-                    *parcel_state = ParcelState::CarriedBy(agent_entity);
+                    *parcel_state = ParcelState::CarriedBy(porter_entity);
                     cargo.current_weight += parcel.weight;
                     job.phase = JobPhase::GoToDepot;
                     energy.spend(now, ITEM_ACTION_ENERGY_COST);
                     tracing::debug!(
-                        agent = ?agent_entity,
+                        porter = ?porter_entity,
                         cargo = cargo.current_weight,
-                        "agent picked up parcel"
+                        "porter picked up parcel"
                     );
                     continue;
                 }
 
                 if let Some(moved) = greedy_step(
                     map,
-                    agent_entity,
+                    porter_entity,
                     &mut position,
                     cargo.current_weight,
                     cargo.max_weight,
@@ -111,16 +132,16 @@ pub fn agent_jobs(
                     job.parcel = None;
                     energy.spend(now, ITEM_ACTION_ENERGY_COST);
                     tracing::info!(
-                        agent = ?agent_entity,
+                        porter = ?porter_entity,
                         delivered_parcels = delivery_stats.delivered_parcels,
-                        "agent delivered parcel"
+                        "porter delivered parcel"
                     );
                     continue;
                 }
 
                 if let Some(moved) = greedy_step(
                     map,
-                    agent_entity,
+                    porter_entity,
                     &mut position,
                     cargo.current_weight,
                     cargo.max_weight,
@@ -192,9 +213,12 @@ fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
 mod tests {
     use super::*;
 
-    fn spawn_test_agent(world: &mut World, id: usize, position: Position) {
+    fn spawn_test_porter(world: &mut World, id: usize, position: Position) {
         world.spawn((
-            Agent { id },
+            Actor,
+            AutonomousActor,
+            WantsAction,
+            Porter { id },
             position,
             Velocity::default(),
             Cargo {
@@ -214,15 +238,15 @@ mod tests {
     }
 
     #[test]
-    fn agents_reserve_distinct_loose_parcels() {
+    fn porters_reserve_distinct_loose_parcels() {
         let mut world = World::new();
-        spawn_test_agent(&mut world, 0, Position { x: 0, y: 0 });
-        spawn_test_agent(&mut world, 1, Position { x: 1, y: 0 });
+        spawn_test_porter(&mut world, 0, Position { x: 0, y: 0 });
+        spawn_test_porter(&mut world, 1, Position { x: 1, y: 0 });
         spawn_test_parcel(&mut world, Position { x: 2, y: 0 });
         spawn_test_parcel(&mut world, Position { x: 3, y: 0 });
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(assign_agent_jobs);
+        schedule.add_systems(assign_porter_jobs);
         schedule.run(&mut world);
 
         let mut job_query = world.query::<&AssignedJob>();
@@ -241,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_picks_up_and_delivers_parcel_to_depot() {
+    fn porter_picks_up_and_delivers_parcel_to_depot() {
         let mut world = World::new();
         let map = Map::generate();
         let depot = map.depot_coord();
@@ -249,7 +273,7 @@ mod tests {
         world.insert_resource(crate::resources::SimulationClock { turn: 0 });
         world.insert_resource(DeliveryStats::default());
         world.insert_resource(EnergyTimeline::default());
-        spawn_test_agent(
+        spawn_test_porter(
             &mut world,
             0,
             Position {
@@ -266,7 +290,14 @@ mod tests {
         );
 
         let mut schedule = Schedule::default();
-        schedule.add_systems((assign_agent_jobs, agent_jobs));
+        schedule.add_systems(
+            (
+                update_porter_action_interest,
+                assign_porter_jobs,
+                porter_jobs,
+            )
+                .chain(),
+        );
         for _ in 0..12 {
             schedule.run(&mut world);
             world.resource_mut::<EnergyTimeline>().now += 100;
@@ -282,23 +313,23 @@ mod tests {
             .count();
         assert_eq!(delivered_parcels, 1);
 
-        let mut cargo_query = world.query_filtered::<&Cargo, With<Agent>>();
-        let empty_agents = cargo_query
+        let mut cargo_query = world.query_filtered::<&Cargo, With<Porter>>();
+        let empty_porters = cargo_query
             .iter(&world)
             .filter(|cargo| cargo.current_weight == 0.0)
             .count();
-        assert_eq!(empty_agents, 1);
+        assert_eq!(empty_porters, 1);
     }
 
     #[test]
-    fn ready_agent_takes_only_one_job_action_per_schedule_run() {
+    fn ready_porter_takes_only_one_job_action_per_schedule_run() {
         let mut world = World::new();
         let map = Map::generate();
         let depot = map.depot_coord();
         world.insert_resource(map);
         world.insert_resource(DeliveryStats::default());
         world.insert_resource(EnergyTimeline::default());
-        spawn_test_agent(
+        spawn_test_porter(
             &mut world,
             0,
             Position {
@@ -315,7 +346,14 @@ mod tests {
         );
 
         let mut schedule = Schedule::default();
-        schedule.add_systems((assign_agent_jobs, agent_jobs).chain());
+        schedule.add_systems(
+            (
+                update_porter_action_interest,
+                assign_porter_jobs,
+                porter_jobs,
+            )
+                .chain(),
+        );
         schedule.run(&mut world);
 
         assert_eq!(world.resource::<DeliveryStats>().delivered_parcels, 0);
@@ -325,8 +363,9 @@ mod tests {
             .iter(&world)
             .any(|state| matches!(state, ParcelState::CarriedBy(_))));
 
-        let mut agent_query = world.query_filtered::<(&AssignedJob, &ActionEnergy), With<Agent>>();
-        let (job, energy) = agent_query.single(&world).unwrap();
+        let mut porter_query =
+            world.query_filtered::<(&AssignedJob, &ActionEnergy), With<Porter>>();
+        let (job, energy) = porter_query.single(&world).unwrap();
         assert!(matches!(job.phase, JobPhase::GoToDepot));
         assert_eq!(energy.ready_at, u64::from(ITEM_ACTION_ENERGY_COST));
     }

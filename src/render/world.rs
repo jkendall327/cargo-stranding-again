@@ -36,7 +36,7 @@ pub(super) fn draw_world(world: &mut World, camera: Camera) {
     }
 
     draw_parcels(world, camera);
-    draw_agents(world, camera);
+    draw_porters(world, camera);
     draw_player(world, camera);
     draw_viewport_frame(camera);
 }
@@ -176,9 +176,9 @@ fn draw_parcels(world: &mut World, camera: Camera) {
     }
 }
 
-fn draw_agents(world: &mut World, camera: Camera) {
-    let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob)>();
-    for (position, agent, cargo, job) in query.iter(world) {
+fn draw_porters(world: &mut World, camera: Camera) {
+    let mut query = world.query::<(&Position, &Porter, &Cargo, &AssignedJob)>();
+    for (position, porter, cargo, job) in query.iter(world) {
         if !camera.contains(*position) {
             continue;
         }
@@ -193,7 +193,7 @@ fn draw_agents(world: &mut World, camera: Camera) {
         draw_circle(cx, cy, 8.0, Color::from_rgba(12, 14, 16, 230));
         draw_circle(cx, cy, 6.0, color);
         draw_circle_lines(cx, cy, 9.5, 2.0, WHITE);
-        draw_text(&format!("P{}", agent.id), px + 1.0, py + 13.0, 12.0, BLACK);
+        draw_text(&format!("P{}", porter.id), px + 1.0, py + 13.0, 12.0, BLACK);
 
         let label = match job.phase {
             JobPhase::FindParcel => "?",

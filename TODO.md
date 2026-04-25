@@ -71,7 +71,7 @@ Goal: move player and NPC movement through shared movement-resolution code inste
   - [x] Do not build all modes until a feature uses them.
 - [x] Extract terrain/stamina/cargo movement calculation out of `systems::player_actions`.
 - [x] Make `systems::player_actions` consume `PlayerIntent` and call the shared resolver.
-- [x] Make `systems::agent_jobs` call the shared resolver or a shared passability/cost helper.
+- [x] Make `systems::porter_jobs` call the shared resolver or a shared passability/cost helper.
 - [x] Keep failed movement from consuming a turn.
 - [x] Add tests for the resolver itself.
   - [x] Bounds blocked.
@@ -84,7 +84,7 @@ Goal: move player and NPC movement through shared movement-resolution code inste
 Notes for future Codex runs:
 
 - Current player action code lives in `src/systems.rs::player_actions`.
-- Agent stepping lives in `greedy_step` and `step_delay` in `src/systems.rs`.
+- Porter stepping lives in `greedy_step` in `src/systems/agents.rs`.
 - Terrain stats currently live as methods on `src/map.rs::Terrain`.
 - Be careful with Rust borrow rules if the resolver needs map data plus mutable components; a pure helper returning a decision is probably easiest first.
 
@@ -288,7 +288,7 @@ Goal: move from hardcoded porter delivery behavior toward simple goal-driven age
   - [ ] Parcel no longer exists.
   - [ ] Parcel already carried by someone else.
   - [ ] Destination unreachable.
-  - [ ] Agent lacks capacity.
+  - [ ] Porter lacks capacity.
 - [ ] Add at least one non-delivery goal later.
   - [ ] Rest/recover stamina.
   - [ ] Seek shelter.
@@ -297,8 +297,8 @@ Goal: move from hardcoded porter delivery behavior toward simple goal-driven age
 
 Current code pointers:
 
-- `assign_agent_jobs` reserves loose parcels.
-- `agent_jobs` moves through `FindParcel`, `GoToParcel`, `GoToDepot`, `Done`.
+- `assign_porter_jobs` reserves loose parcels.
+- `porter_jobs` moves through `FindParcel`, `GoToParcel`, `GoToDepot`, `Done`.
 - `greedy_step` is deliberately simple and should be replaced before worldgen gets serious.
 
 ## 7. Simulationist Body, Balance, And Weather

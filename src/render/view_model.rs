@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::cargo::player_carried_parcels;
 use crate::components::{
-    Agent, AssignedJob, Cargo, JobPhase, Momentum, MovementState, Player, Position, Stamina,
+    AssignedJob, Cargo, JobPhase, Momentum, MovementState, Player, Porter, Position, Stamina,
 };
 use crate::energy::ActionEnergy;
 use crate::map::{Map, TileCoord};
@@ -128,11 +128,11 @@ impl InventoryEntry {
 impl PorterDebugRow {
     pub fn all_from_world(world: &mut World) -> Vec<Self> {
         let timeline = world.resource::<EnergyTimeline>().now;
-        let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob, &ActionEnergy)>();
+        let mut query = world.query::<(&Position, &Porter, &Cargo, &AssignedJob, &ActionEnergy)>();
         let mut rows = query
             .iter(world)
-            .map(|(position, agent, cargo, job, energy)| Self {
-                id: agent.id,
+            .map(|(position, porter, cargo, job, energy)| Self {
+                id: porter.id,
                 position: *position,
                 phase_label: phase_label(job.phase),
                 load: cargo.current_weight,

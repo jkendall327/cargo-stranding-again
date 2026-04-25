@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
 use crate::components::{
-    Agent, Cargo, CargoParcel, Momentum, MovementState, ParcelState, Player, Position, Stamina,
+    Cargo, CargoParcel, Momentum, MovementState, ParcelState, Player, Porter, Position, Stamina,
 };
 use crate::map::{Map, TileCoord};
 use crate::resources::{
@@ -315,7 +315,7 @@ pub fn ascii_viewport(world: &mut World) -> Option<String> {
     }
 
     mark_parcels(world, camera, &mut rows);
-    mark_agents(world, camera, &mut rows);
+    mark_porters(world, camera, &mut rows);
     mark_position(camera, &mut rows, player_position, '@');
 
     Some(rows.join("\n"))
@@ -347,8 +347,8 @@ fn mark_parcels(world: &mut World, camera: Camera, rows: &mut [String]) {
     }
 }
 
-fn mark_agents(world: &mut World, camera: Camera, rows: &mut [String]) {
-    let mut query = world.query_filtered::<&Position, With<Agent>>();
+fn mark_porters(world: &mut World, camera: Camera, rows: &mut [String]) {
+    let mut query = world.query_filtered::<&Position, With<Porter>>();
     for position in query.iter(world) {
         mark_position(camera, rows, *position, 'P');
     }

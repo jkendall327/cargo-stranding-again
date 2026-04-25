@@ -15,9 +15,16 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
     schedule
 }
 
-pub(crate) fn agent_phase_schedule() -> Schedule {
+pub(crate) fn autonomous_actor_phase_schedule() -> Schedule {
     let mut schedule = Schedule::default();
-    schedule.add_systems((systems::assign_agent_jobs, systems::agent_jobs).chain());
+    schedule.add_systems(
+        (
+            systems::update_porter_action_interest,
+            systems::assign_porter_jobs,
+            systems::porter_jobs,
+        )
+            .chain(),
+    );
     schedule
 }
 

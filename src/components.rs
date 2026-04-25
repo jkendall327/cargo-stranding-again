@@ -39,7 +39,16 @@ pub struct Velocity {
 pub struct Player;
 
 #[derive(Component, Debug)]
-pub struct Agent {
+pub struct Actor;
+
+#[derive(Component, Debug)]
+pub struct AutonomousActor;
+
+#[derive(Component, Debug)]
+pub struct WantsAction;
+
+#[derive(Component, Debug)]
+pub struct Porter {
     pub id: usize,
 }
 

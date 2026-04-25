@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{Agent, AssignedJob, CargoParcel, JobPhase, ParcelState, Player};
+use crate::components::{AutonomousActor, Player, WantsAction};
 use crate::energy::ActionEnergy;
 use crate::map::Map;
 use crate::resources::{EnergyTimeline, PlayerIntent, SimulationClock};
@@ -9,12 +9,12 @@ pub(crate) fn has_player_intent(world: &World) -> bool {
     world.resource::<PlayerIntent>().action.is_some()
 }
 
-pub(crate) fn advance_to_player_ready(world: &mut World, agent_schedule: &mut Schedule) {
+pub(crate) fn advance_to_player_ready(world: &mut World, autonomous_schedule: &mut Schedule) {
     if let Some(player_ready_at) = player_ready_at(world) {
         let now = world.resource::<EnergyTimeline>().now;
         if player_ready_at > now {
             if world.contains_resource::<Map>() {
-                catch_up_agents_until(world, agent_schedule, player_ready_at);
+                catch_up_autonomous_actors_until(world, autonomous_schedule, player_ready_at);
             } else {
                 world.resource_mut::<EnergyTimeline>().now = player_ready_at;
             }
@@ -22,11 +22,14 @@ pub(crate) fn advance_to_player_ready(world: &mut World, agent_schedule: &mut Sc
     }
 }
 
-pub(crate) fn advance_after_player_action_spent(world: &mut World, agent_schedule: &mut Schedule) {
+pub(crate) fn advance_after_player_action_spent(
+    world: &mut World,
+    autonomous_schedule: &mut Schedule,
+) {
     world.resource_mut::<SimulationClock>().turn += 1;
     if let Some(player_ready_at) = player_ready_at(world) {
         if world.contains_resource::<Map>() {
-            catch_up_agents_until(world, agent_schedule, player_ready_at);
+            catch_up_autonomous_actors_until(world, autonomous_schedule, player_ready_at);
         } else {
             world.resource_mut::<EnergyTimeline>().now = player_ready_at;
         }
@@ -47,12 +50,18 @@ pub(crate) fn player_ready_at(world: &mut World) -> Option<u64> {
     query.iter(world).next().map(|energy| energy.ready_at)
 }
 
-fn catch_up_agents_until(world: &mut World, agent_schedule: &mut Schedule, until_time: u64) {
-    while let Some(next_ready_at) = next_ready_agent_time(world, until_time) {
+fn catch_up_autonomous_actors_until(
+    world: &mut World,
+    autonomous_schedule: &mut Schedule,
+    until_time: u64,
+) {
+    autonomous_schedule.run(world);
+
+    while let Some(next_ready_at) = next_ready_autonomous_actor_time(world, until_time) {
         world.resource_mut::<EnergyTimeline>().now = next_ready_at;
-        let before = ready_agent_progress_marker(world);
-        agent_schedule.run(world);
-        let after = ready_agent_progress_marker(world);
+        let before = ready_autonomous_actor_progress_marker(world);
+        autonomous_schedule.run(world);
+        let after = ready_autonomous_actor_progress_marker(world);
 
         if after == before {
             break;
@@ -62,32 +71,22 @@ fn catch_up_agents_until(world: &mut World, agent_schedule: &mut Schedule, until
     world.resource_mut::<EnergyTimeline>().now = until_time;
 }
 
-fn next_ready_agent_time(world: &mut World, until_time: u64) -> Option<u64> {
+fn next_ready_autonomous_actor_time(world: &mut World, until_time: u64) -> Option<u64> {
     let now = world.resource::<EnergyTimeline>().now;
-    let has_loose_parcel = {
-        let mut parcels = world.query_filtered::<&ParcelState, With<CargoParcel>>();
-        parcels
-            .iter(world)
-            .any(|state| matches!(state, ParcelState::Loose))
-    };
-
-    let mut agents = world.query_filtered::<(&ActionEnergy, &AssignedJob), With<Agent>>();
-    agents
+    let mut actors =
+        world.query_filtered::<&ActionEnergy, (With<AutonomousActor>, With<WantsAction>)>();
+    actors
         .iter(world)
-        .filter(|(energy, job)| {
-            energy.ready_at <= until_time
-                && (has_loose_parcel
-                    || (job.parcel.is_some()
-                        && !matches!(job.phase, JobPhase::FindParcel | JobPhase::Done)))
-        })
-        .map(|(energy, _)| energy.ready_at.max(now))
+        .filter(|energy| energy.ready_at <= until_time)
+        .map(|energy| energy.ready_at.max(now))
         .min()
 }
 
-fn ready_agent_progress_marker(world: &mut World) -> Vec<(Entity, u64)> {
+fn ready_autonomous_actor_progress_marker(world: &mut World) -> Vec<(Entity, u64)> {
     let now = world.resource::<EnergyTimeline>().now;
-    let mut agents = world.query_filtered::<(Entity, &ActionEnergy), With<Agent>>();
-    agents
+    let mut actors = world
+        .query_filtered::<(Entity, &ActionEnergy), (With<AutonomousActor>, With<WantsAction>)>();
+    actors
         .iter(world)
         .filter(|(_, energy)| energy.ready_at <= now)
         .map(|(entity, energy)| (entity, energy.ready_at))

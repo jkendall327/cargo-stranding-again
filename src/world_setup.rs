@@ -28,6 +28,7 @@ pub fn init_world(world: &mut World) {
     world.insert_resource(DeliveryStats::default());
 
     world.spawn((
+        Actor,
         Player,
         Position { x: 6, y: 6 },
         Velocity::default(),
@@ -46,7 +47,10 @@ pub fn init_world(world: &mut World) {
 
     for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {
         world.spawn((
-            Agent { id },
+            Actor,
+            AutonomousActor,
+            WantsAction,
+            Porter { id },
             Position { x, y },
             Velocity::default(),
             Cargo {
@@ -76,7 +80,7 @@ pub fn init_world(world: &mut World) {
     }
 
     tracing::info!(
-        agents = 2,
+        porters = 2,
         parcels = 5,
         player_x = 6,
         player_y = 6,
