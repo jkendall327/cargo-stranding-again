@@ -38,7 +38,7 @@ pub fn player_actions(
         mut cargo,
         mut movement_state,
         mut energy,
-    )) = player_query.get_single_mut()
+    )) = player_query.single_mut()
     else {
         return;
     };
