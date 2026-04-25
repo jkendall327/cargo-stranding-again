@@ -13,6 +13,23 @@ It uses:
 cargo run
 ```
 
+## Headless Smoke Tests
+
+Run all JSON scenarios:
+
+```sh
+cargo run --bin headless -- all
+```
+
+Run one scenario:
+
+```sh
+cargo run --bin headless -- --scenario scenarios/headless/walk-east.json
+```
+
+Scenario files live in `scenarios/headless`. They issue headless commands and
+check the final snapshot with an `expect` object.
+
 ## Controls
 
 - Move with `WASD` or arrow keys.

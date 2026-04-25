@@ -10,6 +10,7 @@ standalone Bevy ECS for deterministic simulation state.
 - `cargo test`
 - `cargo run`
 - `cargo run --bin headless -- <commands>`
+- `cargo run --bin headless -- all`
 
 ## Headless Harness
 
@@ -20,6 +21,41 @@ Example:
 
 ```sh
 cargo run --bin headless -- mode move east wait pickup
+```
+
+Run all JSON smoke scenarios:
+
+```sh
+cargo run --bin headless -- all
+```
+
+Run one scenario file:
+
+```sh
+cargo run --bin headless -- --scenario scenarios/headless/walk-east.json
+```
+
+Scenario files live in `scenarios/headless`. They contain a list of commands and
+an `expect` object checked against the final snapshot. Commands can be plain
+strings or structured repeats:
+
+```json
+{
+  "name": "repeated wait",
+  "commands": [
+    {
+      "repeat": 3,
+      "command": "wait"
+    }
+  ],
+  "expect": {
+    "turn": 3,
+    "player_position": {
+      "x": 6,
+      "y": 6
+    }
+  }
+}
 ```
 
 Supported commands include:

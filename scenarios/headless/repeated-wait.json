@@ -1,0 +1,23 @@
+{
+  "name": "repeated wait",
+  "commands": [
+    {
+      "repeat": 3,
+      "command": "wait"
+    }
+  ],
+  "expect": {
+    "turn": 3,
+    "timeline": 300,
+    "player_position": {
+      "x": 6,
+      "y": 6
+    },
+    "player_movement_mode": "walking",
+    "player_stamina": 35.0,
+    "loose_parcels": 3,
+    "assigned_parcels": 2,
+    "carried_parcels": 0,
+    "delivered_parcels": 0
+  }
+}

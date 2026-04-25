@@ -1,0 +1,18 @@
+{
+  "name": "walk east once",
+  "commands": ["east"],
+  "expect": {
+    "turn": 1,
+    "timeline": 100,
+    "player_position": {
+      "x": 7,
+      "y": 6
+    },
+    "player_movement_mode": "walking",
+    "player_stamina": 35.0,
+    "loose_parcels": 3,
+    "assigned_parcels": 2,
+    "carried_parcels": 0,
+    "delivered_parcels": 0
+  }
+}

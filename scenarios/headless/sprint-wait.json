@@ -1,0 +1,18 @@
+{
+  "name": "sprint then wait",
+  "commands": ["mode", "east", "wait"],
+  "expect": {
+    "turn": 2,
+    "timeline": 165,
+    "player_position": {
+      "x": 7,
+      "y": 6
+    },
+    "player_movement_mode": "sprinting",
+    "player_stamina": 35.0,
+    "loose_parcels": 3,
+    "assigned_parcels": 2,
+    "carried_parcels": 0,
+    "delivered_parcels": 0
+  }
+}
