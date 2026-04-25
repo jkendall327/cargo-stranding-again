@@ -1,5 +1,6 @@
 {
   "name": "walk east once",
+  "view": true,
   "commands": ["east"],
   "expect": {
     "turn": 1,

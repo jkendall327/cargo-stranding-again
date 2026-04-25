@@ -28,7 +28,9 @@ cargo run --bin headless -- --scenario scenarios/headless/walk-east.json
 ```
 
 Scenario files live in `scenarios/headless`. They issue headless commands and
-check the final snapshot with an `expect` object.
+check the final snapshot with an `expect` object. Failed scenarios print a final
+ASCII camera view automatically. Add `"view": true` to print that view on
+success too.
 
 ## Controls
 

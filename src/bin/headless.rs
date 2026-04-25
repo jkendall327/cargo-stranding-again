@@ -183,6 +183,9 @@ fn print_scenario_report(path: &Path, report: &HeadlessScenarioReport) {
             path.display(),
             format_snapshot(report.final_snapshot)
         );
+        if report.show_view {
+            print_ascii_view(&report.final_view);
+        }
         return;
     }
 
@@ -195,6 +198,7 @@ fn print_scenario_report(path: &Path, report: &HeadlessScenarioReport) {
     for failure in &report.failures {
         print_expectation_failure(failure);
     }
+    print_ascii_view(&report.final_view);
 }
 
 fn print_expectation_failure(failure: &ExpectationFailure) {
@@ -202,6 +206,13 @@ fn print_expectation_failure(failure: &ExpectationFailure) {
         "  expected {}={} actual={}",
         failure.field, failure.expected, failure.actual
     );
+}
+
+fn print_ascii_view(view: &str) {
+    println!("  view:");
+    for line in view.lines() {
+        println!("    {line}");
+    }
 }
 
 fn print_snapshot(label: &str, snapshot: Option<HeadlessSnapshot>) {

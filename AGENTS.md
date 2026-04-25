@@ -36,12 +36,14 @@ cargo run --bin headless -- --scenario scenarios/headless/walk-east.json
 ```
 
 Scenario files live in `scenarios/headless`. They contain a list of commands and
-an `expect` object checked against the final snapshot. Commands can be plain
-strings or structured repeats:
+an `expect` object checked against the final snapshot. Failed scenarios print a
+final ASCII camera view automatically. Add `"view": true` to print that view on
+success too. Commands can be plain strings or structured repeats:
 
 ```json
 {
   "name": "repeated wait",
+  "view": true,
   "commands": [
     {
       "repeat": 3,

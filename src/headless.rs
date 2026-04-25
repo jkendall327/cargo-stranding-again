@@ -3,10 +3,11 @@ use serde::Deserialize;
 
 use crate::app::init_world;
 use crate::components::{
-    Cargo, CargoParcel, MovementState, ParcelState, Player, Position, Stamina,
+    Agent, Cargo, CargoParcel, MovementState, ParcelState, Player, Position, Stamina,
 };
+use crate::map::Map;
 use crate::resources::{
-    Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
+    Camera, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
 };
 use crate::systems;
 
@@ -150,6 +151,8 @@ impl HeadlessCommand {
 pub struct HeadlessScenario {
     pub name: Option<String>,
     #[serde(default)]
+    pub view: bool,
+    #[serde(default)]
     pub commands: Vec<ScenarioCommand>,
     #[serde(default)]
     pub expect: HeadlessExpect,
@@ -198,6 +201,8 @@ pub enum ExpectedMovementMode {
 pub struct HeadlessScenarioReport {
     pub name: String,
     pub final_snapshot: HeadlessSnapshot,
+    pub final_view: String,
+    pub show_view: bool,
     pub failures: Vec<ExpectationFailure>,
 }
 
@@ -235,12 +240,85 @@ pub fn run_scenario(
     }
 
     let final_snapshot = game.snapshot().ok_or(HeadlessScenarioError::NoPlayer)?;
+    let final_view = ascii_viewport(game.world_mut()).ok_or(HeadlessScenarioError::NoPlayer)?;
     let failures = scenario.expect.compare(final_snapshot);
     Ok(HeadlessScenarioReport {
         name: scenario.display_name().to_owned(),
         final_snapshot,
+        final_view,
+        show_view: scenario.view,
         failures,
     })
+}
+
+pub fn ascii_viewport(world: &mut World) -> Option<String> {
+    const VIEW_SPAN: i32 = 15;
+
+    let player_position = {
+        let mut query = world.query_filtered::<&Position, With<Player>>();
+        query.iter(world).next().copied()?
+    };
+
+    let map = world.resource::<Map>();
+    let mut camera = Camera::square(VIEW_SPAN);
+    camera.center_on(player_position, map.width, map.height);
+
+    let mut rows = Vec::new();
+    for y in camera.y..(camera.y + camera.height).min(map.height) {
+        let mut row = String::new();
+        for x in camera.x..(camera.x + camera.width).min(map.width) {
+            row.push(terrain_glyph(map, x, y));
+        }
+        rows.push(row);
+    }
+
+    mark_parcels(world, camera, &mut rows);
+    mark_agents(world, camera, &mut rows);
+    mark_position(camera, &mut rows, player_position, '@');
+
+    Some(rows.join("\n"))
+}
+
+fn terrain_glyph(map: &Map, x: i32, y: i32) -> char {
+    match map.terrain_at(x, y).expect("camera iteration is in bounds") {
+        crate::map::Terrain::Grass => '.',
+        crate::map::Terrain::Mud => '~',
+        crate::map::Terrain::Rock => '^',
+        crate::map::Terrain::Water => 'w',
+        crate::map::Terrain::Road => '=',
+        crate::map::Terrain::Depot => 'D',
+    }
+}
+
+fn mark_parcels(world: &mut World, camera: Camera, rows: &mut [String]) {
+    let mut query = world.query::<(&Position, &ParcelState)>();
+    for (position, state) in query.iter(world) {
+        let glyph = match state {
+            ParcelState::Loose => '*',
+            ParcelState::AssignedTo(_) => '+',
+            ParcelState::CarriedBy(_) | ParcelState::Delivered => continue,
+        };
+        mark_position(camera, rows, *position, glyph);
+    }
+}
+
+fn mark_agents(world: &mut World, camera: Camera, rows: &mut [String]) {
+    let mut query = world.query_filtered::<&Position, With<Agent>>();
+    for position in query.iter(world) {
+        mark_position(camera, rows, *position, 'P');
+    }
+}
+
+fn mark_position(camera: Camera, rows: &mut [String], position: Position, glyph: char) {
+    if !camera.contains(position) {
+        return;
+    }
+
+    let row = (position.y - camera.y) as usize;
+    let column = (position.x - camera.x) as usize;
+    if let Some(row) = rows.get_mut(row) {
+        row.replace_range(column..=column, &glyph.to_string());
+    }
 }
 
 fn expand_command(command: &ScenarioCommand) -> Vec<String> {
@@ -463,5 +541,15 @@ mod tests {
                 actual: "1".to_owned()
             }]
         );
+    }
+
+    #[test]
+    fn ascii_viewport_marks_the_player() {
+        let mut game = HeadlessGame::new();
+
+        let view = ascii_viewport(game.world_mut()).expect("viewport should render");
+
+        assert!(view.contains('@'));
+        assert_eq!(view.lines().count(), 15);
     }
 }
