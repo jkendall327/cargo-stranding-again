@@ -67,7 +67,7 @@ Goal: move player and NPC movement through shared movement-resolution code inste
   - [x] Include the actual `dx/dy`, target position, terrain, stamina delta, and turn/cooldown cost in the result.
 - [x] Introduce `MovementMode`.
   - [x] Start with `Walking`.
-  - [x] Leave room for `Sprinting`, `Crawling`, `Swimming`, `Climbing`, `Rappelling`, and `Falling`.
+  - [x] Leave room for `Sprinting`, `Steady`, `Swimming`, `Climbing`, `Rappelling`, and `Falling`.
   - [x] Do not build all modes until a feature uses them.
 - [x] Extract terrain/stamina/cargo movement calculation out of `systems::player_actions`.
 - [x] Make `systems::player_actions` consume `PlayerIntent` and call the shared resolver.
@@ -94,8 +94,8 @@ Goal: grow `PlayerAction` deliberately without turning it into input-shaped move
 
 - [ ] Add action variants only as systems exist to consume them.
 - [ ] Candidate variants:
-  - [x] Persistent sprint posture via `ToggleSprint` + `Move(Direction)`
-  - [ ] `Crawl(Direction)`
+  - [x] Persistent movement posture via `CycleMovementMode` + `Move(Direction)`.
+  - [x] `Steady` movement mode as the slower, stamina-conserving opposite of sprinting.
   - [x] `PickUp`
   - [x] `Drop` via inventory menu confirm for temporary cargo parcels
   - [ ] `Interact`
@@ -121,6 +121,7 @@ Design decisions:
   - Actors act when they have enough energy for their next action.
   - A priority queue or equivalent ready-time scheduler is the likely fit.
 - Sprinting lowers movement energy cost and increases stamina/stability cost.
+- Steady walking raises movement energy cost and reduces rough-terrain stamina cost.
 - Stamina can start as a hard gate for draining actions.
   - Later, low stamina can become a risk/performance modifier without changing the scheduler architecture.
 - Non-movement actions should also cost energy.
@@ -142,6 +143,7 @@ Implementation tasks:
 - [x] Define action energy costs.
   - [x] Walking movement baseline, e.g. `100`.
   - [x] Sprinting movement cheaper than walking, e.g. `60`, before terrain/load modifiers.
+  - [x] Steady movement more expensive than walking, e.g. `135`, before terrain/load modifiers.
   - [x] Wait/rest baseline.
   - [x] Pickup/drop baseline.
   - [x] Future interact/combat placeholders.
@@ -171,6 +173,8 @@ Implementation tasks:
 - [x] Add tests.
   - [x] Sprinting movement costs less energy than walking.
   - [x] Sprinting movement still costs more stamina than walking.
+  - [x] Steady movement costs more energy than walking.
+  - [x] Steady movement costs less stamina than walking on rough terrain.
   - [x] Failed movement spends no energy.
   - [x] Successful pickup spends energy.
   - [x] Failed pickup spends no energy.
@@ -446,7 +450,7 @@ Goal: keep the project pleasant as it stops being tiny.
 ## Suggested Implementation Order
 
 1. Extract shared movement resolution.
-2. Add `MovementMode::Walking` and prepare for sprint/crawl/swim.
+2. Add `MovementMode::Walking` and prepare for sprint/steady/swim.
 3. Add the action energy timeline.
 4. Replace direct cargo-weight mutation with item/carry relationships.
 5. Update NPC porter jobs to use the cargo model.

@@ -135,8 +135,8 @@ pub fn player_actions(
                 );
             }
         }
-        PlayerAction::ToggleSprint => {
-            movement_state.toggle_sprint();
+        PlayerAction::CycleMovementMode => {
+            movement_state.cycle_mode();
             tracing::info!(
                 mode = movement_state.mode.label(),
                 "player movement mode changed"
@@ -354,10 +354,10 @@ mod tests {
     }
 
     #[test]
-    fn toggling_sprint_changes_movement_mode_without_consuming_turn() {
+    fn cycling_movement_mode_changes_mode_without_consuming_turn() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        insert_player_action_resources(&mut world, PlayerAction::ToggleSprint);
+        insert_player_action_resources(&mut world, PlayerAction::CycleMovementMode);
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
@@ -380,6 +380,26 @@ mod tests {
             movement_state.mode,
             crate::movement::MovementMode::Sprinting
         );
+    }
+
+    #[test]
+    fn cycling_movement_mode_reaches_steady_on_second_tap() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        insert_player_action_resources(&mut world, PlayerAction::CycleMovementMode);
+        spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_actions);
+        schedule.run(&mut world);
+        schedule.run(&mut world);
+
+        let mut player_query = world.query_filtered::<&MovementState, With<Player>>();
+        let movement_state = player_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(movement_state.mode, crate::movement::MovementMode::Steady);
     }
 
     #[test]

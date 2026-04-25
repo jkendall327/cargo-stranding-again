@@ -17,7 +17,7 @@ cargo run
 
 - Move with `WASD` or arrow keys.
 - Wait with `Space` or `.`.
-- Toggle walking/sprinting with `Shift`.
+- Cycle walking/sprinting/steady walking with `Shift`.
 - Pick up loose cargo on your tile with `E`.
 - Pause and resume with `Esc`.
 - In the pause menu, use `WASD`/arrow keys to choose `Resume` or `Options`, then `Enter`/`Space` to confirm.
@@ -26,6 +26,7 @@ cargo run
 - Mud and rock drain stamina, with cargo making that drain worse.
 - Roads and the depot restore stamina when traversed.
 - Sprinting spends extra stamina and reduces movement energy cost.
+- Steady walking spends more movement energy but reduces rough-terrain stamina drain.
 - Timeline energy advances only when movement succeeds, pickup succeeds, or you wait. Failed movement and failed pickup do not spend energy.
 - Waiting recovers stamina directly.
 

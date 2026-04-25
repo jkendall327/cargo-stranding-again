@@ -49,10 +49,11 @@ impl Default for MovementState {
 }
 
 impl MovementState {
-    pub fn toggle_sprint(&mut self) {
+    pub fn cycle_mode(&mut self) {
         self.mode = match self.mode {
             MovementMode::Walking => MovementMode::Sprinting,
-            MovementMode::Sprinting => MovementMode::Walking,
+            MovementMode::Sprinting => MovementMode::Steady,
+            MovementMode::Steady => MovementMode::Walking,
         };
     }
 }

@@ -45,7 +45,7 @@ pub enum PlayerAction {
     Move(Direction),
     OpenInventory,
     PickUp,
-    ToggleSprint,
+    CycleMovementMode,
     Wait,
 }
 
@@ -361,14 +361,14 @@ mod tests {
 
         assert_eq!(
             repeat.action_for_frame(
-                Some(PlayerAction::ToggleSprint),
-                Some(PlayerAction::ToggleSprint),
+                Some(PlayerAction::CycleMovementMode),
+                Some(PlayerAction::CycleMovementMode),
                 0.0
             ),
-            Some(PlayerAction::ToggleSprint)
+            Some(PlayerAction::CycleMovementMode)
         );
         assert_eq!(
-            repeat.action_for_frame(Some(PlayerAction::ToggleSprint), None, 1.0),
+            repeat.action_for_frame(Some(PlayerAction::CycleMovementMode), None, 1.0),
             None
         );
     }

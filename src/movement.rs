@@ -9,6 +9,7 @@ use crate::resources::Direction;
 pub enum MovementMode {
     Walking,
     Sprinting,
+    Steady,
 }
 
 impl MovementMode {
@@ -16,6 +17,7 @@ impl MovementMode {
         match self {
             Self::Walking => "walking",
             Self::Sprinting => "sprinting",
+            Self::Steady => "steady",
         }
     }
 }
@@ -151,6 +153,7 @@ fn movement_cooldown_cost(terrain: Terrain, mode: MovementMode) -> u32 {
     match mode {
         MovementMode::Walking => terrain_cost,
         MovementMode::Sprinting => ((terrain_cost as f32) * 0.65).max(1.0) as u32,
+        MovementMode::Steady => ((terrain_cost as f32) * 1.35).max(1.0) as u32,
     }
 }
 
@@ -171,6 +174,13 @@ fn stamina_delta_for(terrain: Terrain, mode: MovementMode, cargo: CargoLoad) -> 
                 -1.0
             };
             movement_cost * 2.0 * cargo_load_factor(cargo)
+        }
+        MovementMode::Steady => {
+            if terrain_delta.is_sign_negative() {
+                terrain_delta * 0.5 * cargo_load_factor(cargo)
+            } else {
+                terrain_delta
+            }
         }
     }
 }
@@ -329,6 +339,30 @@ mod tests {
         assert!(sprinting.stamina_delta < walking.stamina_delta);
         assert!(sprinting.cooldown_cost < walking.cooldown_cost);
         assert!(sprinting.energy_cost < walking.energy_cost);
+    }
+
+    #[test]
+    fn steady_movement_costs_more_energy_and_less_stamina_on_rough_ground() {
+        let map = Map::generate();
+        let (start, direction) = find_target_terrain(&map, Terrain::Mud);
+
+        let walking = resolve_movement(&map, request_from(start, direction))
+            .moved()
+            .expect("mud should be passable");
+
+        let steady = resolve_movement(
+            &map,
+            MovementRequest {
+                mode: MovementMode::Steady,
+                ..request_from(start, direction)
+            },
+        )
+        .moved()
+        .expect("mud should be passable");
+
+        assert!(steady.stamina_delta > walking.stamina_delta);
+        assert!(steady.cooldown_cost > walking.cooldown_cost);
+        assert!(steady.energy_cost > walking.energy_cost);
     }
 
     #[test]

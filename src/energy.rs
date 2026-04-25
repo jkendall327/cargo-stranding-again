@@ -30,6 +30,7 @@ pub fn movement_energy_cost(terrain: Terrain, mode: MovementMode) -> u32 {
     match mode {
         MovementMode::Walking => terrain_cost.max(1),
         MovementMode::Sprinting => ((terrain_cost as f32) * 0.65).round().max(1.0) as u32,
+        MovementMode::Steady => ((terrain_cost as f32) * 1.35).round().max(1.0) as u32,
     }
 }
 

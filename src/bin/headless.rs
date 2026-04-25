@@ -66,12 +66,13 @@ fn format_snapshot(snapshot: HeadlessSnapshot) -> String {
     let mut output = String::new();
     let _ = write!(
         output,
-        "turn={} time={} player=({}, {}) stamina={:.1} cargo={:.1} parcels=loose:{},assigned:{},carried:{} delivered={}",
+        "turn={} time={} player=({}, {}) stamina={:.1} mode={} cargo={:.1} parcels=loose:{},assigned:{},carried:{} delivered={}",
         snapshot.turn,
         snapshot.timeline,
         snapshot.player_position.x,
         snapshot.player_position.y,
         snapshot.player_stamina,
+        snapshot.player_movement_mode.label(),
         snapshot.player_cargo,
         snapshot.loose_parcels,
         snapshot.assigned_parcels,
@@ -83,7 +84,7 @@ fn format_snapshot(snapshot: HeadlessSnapshot) -> String {
 
 fn print_usage() {
     println!("Usage: cargo run --bin headless -- <commands>");
-    println!("Commands: north south east west wait pickup sprint");
+    println!("Commands: north south east west wait pickup mode");
     println!("Also accepted: n s e w, up down left right, move <direction>");
-    println!("Example: cargo run --bin headless -- move east wait pickup");
+    println!("Example: cargo run --bin headless -- mode move east wait pickup");
 }

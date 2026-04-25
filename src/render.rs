@@ -17,11 +17,11 @@ const CONTROL_HINTS: [&str; 9] = [
     "Space / .: wait and recover stamina",
     "E: pick up loose cargo here",
     "I / Tab: open inventory",
-    "Shift: toggle walking / sprinting",
+    "Shift: cycle walk / sprint / steady",
     "Esc: pause / resume",
     "Energy advances only on valid action",
     "Water blocks movement",
-    "Sprint spends stamina for speed",
+    "Sprint is fast; steady saves stamina",
 ];
 const LEGEND_LINES: [&str; 4] = [
     "@ player",
@@ -204,6 +204,7 @@ fn draw_player(world: &mut World, camera: Camera) {
     let player_color = match movement_state.mode {
         crate::movement::MovementMode::Walking => Color::from_rgba(235, 235, 246, 255),
         crate::movement::MovementMode::Sprinting => Color::from_rgba(250, 218, 108, 255),
+        crate::movement::MovementMode::Steady => Color::from_rgba(117, 205, 188, 255),
     };
     draw_rectangle(
         px + 2.0,

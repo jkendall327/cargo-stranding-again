@@ -51,7 +51,7 @@ impl Default for KeyBindings {
                 },
                 KeyBinding {
                     keys: vec![KeyCode::LeftShift, KeyCode::RightShift],
-                    action: PlayerAction::ToggleSprint,
+                    action: PlayerAction::CycleMovementMode,
                 },
             ],
             menu: vec![

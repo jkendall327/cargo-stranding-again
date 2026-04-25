@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::*;
 
 use crate::app::init_world;
-use crate::components::{Cargo, CargoParcel, ParcelState, Player, Position, Stamina};
+use crate::components::{
+    Cargo, CargoParcel, MovementState, ParcelState, Player, Position, Stamina,
+};
 use crate::resources::{
     Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
 };
@@ -68,6 +70,7 @@ pub struct HeadlessSnapshot {
     pub delivered_parcels: u32,
     pub player_position: Position,
     pub player_stamina: f32,
+    pub player_movement_mode: crate::movement::MovementMode,
     pub player_cargo: f32,
     pub loose_parcels: usize,
     pub assigned_parcels: usize,
@@ -79,11 +82,16 @@ impl HeadlessSnapshot {
         let clock = *world.resource::<SimulationClock>();
         let timeline = world.resource::<EnergyTimeline>().now;
 
-        let (player_position, player_stamina, player_cargo) = {
-            let mut player_query =
-                world.query_filtered::<(&Position, &Stamina, &Cargo), With<Player>>();
-            let (position, stamina, cargo) = player_query.iter(world).next()?;
-            (*position, stamina.current, cargo.current_weight)
+        let (player_position, player_stamina, player_movement_mode, player_cargo) = {
+            let mut player_query = world
+                .query_filtered::<(&Position, &Stamina, &MovementState, &Cargo), With<Player>>();
+            let (position, stamina, movement_state, cargo) = player_query.iter(world).next()?;
+            (
+                *position,
+                stamina.current,
+                movement_state.mode,
+                cargo.current_weight,
+            )
         };
 
         let mut loose_parcels = 0;
@@ -105,6 +113,7 @@ impl HeadlessSnapshot {
             delivered_parcels: clock.delivered_parcels,
             player_position,
             player_stamina,
+            player_movement_mode,
             player_cargo,
             loose_parcels,
             assigned_parcels,
@@ -128,7 +137,8 @@ impl HeadlessCommand {
             "wait" | "." => PlayerAction::Wait,
             "inventory" | "inv" => PlayerAction::OpenInventory,
             "pickup" | "pick-up" | "pick_up" => PlayerAction::PickUp,
-            "sprint" | "toggle-sprint" | "toggle_sprint" => PlayerAction::ToggleSprint,
+            "mode" | "movement" | "cycle-mode" | "cycle_mode" | "sprint" | "toggle-sprint"
+            | "toggle_sprint" => PlayerAction::CycleMovementMode,
             _ => return None,
         };
         Some(Self::Action(action))
