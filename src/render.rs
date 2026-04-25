@@ -4,8 +4,8 @@ use macroquad::prelude::*;
 use crate::components::*;
 use crate::map::{Map, Terrain, TileCoord};
 use crate::resources::{
-    Camera, EnergyTimeline, GameScreen, InventoryMenuState, PauseMenuEntry, PauseMenuState,
-    SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
+    Camera, DeliveryStats, EnergyTimeline, GameScreen, InventoryMenuState, PauseMenuEntry,
+    PauseMenuState, SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
 };
 
 pub const TILE_SIZE: f32 = 16.0;
@@ -317,6 +317,7 @@ fn draw_ui(world: &mut World, camera: Camera) {
     );
 
     let clock = *world.resource::<SimulationClock>();
+    let delivery_stats = *world.resource::<DeliveryStats>();
     let timeline = *world.resource::<EnergyTimeline>();
     let mut player_query = world.query_filtered::<(
         &Position,
@@ -398,7 +399,7 @@ fn draw_ui(world: &mut World, camera: Camera) {
     ui_line(
         ui_x,
         &mut y,
-        &format!("Delivered parcels: {}", clock.delivered_parcels),
+        &format!("Delivered parcels: {}", delivery_stats.delivered_parcels),
     );
     y += 18.0;
 

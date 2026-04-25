@@ -239,6 +239,10 @@ impl PlayerIntent {
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct SimulationClock {
     pub turn: u64,
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct DeliveryStats {
     pub delivered_parcels: u32,
 }
 

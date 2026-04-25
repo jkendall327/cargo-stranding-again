@@ -4,7 +4,7 @@ use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, ITEM_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
-use crate::resources::{Direction, EnergyTimeline, SimulationClock};
+use crate::resources::{DeliveryStats, Direction, EnergyTimeline};
 
 type AgentJobItem<'a> = (
     Entity,
@@ -41,7 +41,7 @@ pub fn assign_agent_jobs(
 pub fn agent_jobs(
     map: Res<Map>,
     timeline: Res<EnergyTimeline>,
-    mut clock: ResMut<SimulationClock>,
+    mut delivery_stats: ResMut<DeliveryStats>,
     mut agents: Query<AgentJobItem, With<Agent>>,
     mut parcels: Query<(&Position, &CargoParcel, &mut ParcelState), Without<Agent>>,
 ) {
@@ -108,13 +108,13 @@ pub fn agent_jobs(
                     if TileCoord::from(*position) == depot {
                         *parcel_state = ParcelState::Delivered;
                         cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
-                        clock.delivered_parcels += 1;
+                        delivery_stats.delivered_parcels += 1;
                         job.phase = JobPhase::Done;
                         job.parcel = None;
                         energy.spend(now, ITEM_ACTION_ENERGY_COST);
                         tracing::info!(
                             agent = ?agent_entity,
-                            delivered_parcels = clock.delivered_parcels,
+                            delivered_parcels = delivery_stats.delivered_parcels,
                             "agent delivered parcel"
                         );
                         continue;
@@ -249,10 +249,8 @@ mod tests {
         let map = Map::generate();
         let depot = map.depot_coord();
         world.insert_resource(map);
-        world.insert_resource(SimulationClock {
-            turn: 0,
-            delivered_parcels: 0,
-        });
+        world.insert_resource(crate::resources::SimulationClock { turn: 0 });
+        world.insert_resource(DeliveryStats::default());
         world.insert_resource(EnergyTimeline::default());
         spawn_test_agent(
             &mut world,
@@ -277,8 +275,8 @@ mod tests {
             world.resource_mut::<EnergyTimeline>().now += 100;
         }
 
-        let clock = world.resource::<SimulationClock>();
-        assert_eq!(clock.delivered_parcels, 1);
+        let delivery_stats = world.resource::<DeliveryStats>();
+        assert_eq!(delivery_stats.delivered_parcels, 1);
 
         let mut parcel_query = world.query::<&ParcelState>();
         let delivered_parcels = parcel_query

@@ -6,7 +6,8 @@ use crate::components::{
 };
 use crate::map::{Map, TileCoord};
 use crate::resources::{
-    Camera, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
+    Camera, DeliveryStats, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent,
+    SimulationClock,
 };
 use crate::simulation::SimulationRunner;
 use crate::world_setup::init_world;
@@ -82,6 +83,7 @@ pub struct HeadlessSnapshot {
 impl HeadlessSnapshot {
     fn from_world(world: &mut World) -> Option<Self> {
         let clock = *world.resource::<SimulationClock>();
+        let delivery_stats = *world.resource::<DeliveryStats>();
         let timeline = world.resource::<EnergyTimeline>().now;
 
         let (
@@ -135,7 +137,7 @@ impl HeadlessSnapshot {
         Some(Self {
             turn: clock.turn,
             timeline,
-            delivered_parcels: clock.delivered_parcels,
+            delivered_parcels: delivery_stats.delivered_parcels,
             player_position,
             player_elevation,
             player_water_depth,

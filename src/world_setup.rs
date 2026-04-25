@@ -5,7 +5,7 @@ use crate::energy::ActionEnergy;
 use crate::input::KeyBindings;
 use crate::map::Map;
 use crate::resources::{
-    Camera, CargoLossRisk, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
+    Camera, CargoLossRisk, DeliveryStats, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
     InventoryMenuState, MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
 };
 
@@ -24,10 +24,8 @@ pub fn init_world(world: &mut World) {
     world.insert_resource(EnergyTimeline::default());
     world.insert_resource(CargoLossRisk::default());
     world.insert_resource(Camera::default());
-    world.insert_resource(SimulationClock {
-        turn: 0,
-        delivered_parcels: 0,
-    });
+    world.insert_resource(SimulationClock { turn: 0 });
+    world.insert_resource(DeliveryStats::default());
 
     world.spawn((
         Player,

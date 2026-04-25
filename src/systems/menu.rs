@@ -199,10 +199,7 @@ mod tests {
         let mut world = World::new();
         setup_menu_world(&mut world, GameScreen::InventoryMenu, MenuAction::Confirm);
         world.insert_resource(EnergyTimeline::default());
-        world.insert_resource(SimulationClock {
-            turn: 0,
-            delivered_parcels: 0,
-        });
+        world.insert_resource(SimulationClock { turn: 0 });
         world.insert_resource(PlayerIntent::default());
         spawn_test_player(&mut world, Position { x: 2, y: 2 });
 
@@ -243,10 +240,7 @@ mod tests {
         let mut world = World::new();
         setup_menu_world(&mut world, GameScreen::InventoryMenu, MenuAction::Confirm);
         world.insert_resource(EnergyTimeline::default());
-        world.insert_resource(SimulationClock {
-            turn: 0,
-            delivered_parcels: 0,
-        });
+        world.insert_resource(SimulationClock { turn: 0 });
         world.insert_resource(PlayerIntent::default());
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 });
         let parcel = spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
