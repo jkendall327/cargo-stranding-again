@@ -1,5 +1,7 @@
 use bevy_ecs::prelude::*;
 
+use crate::components::{Player, Position};
+use crate::map::{Map, TileCoord};
 use crate::schedules;
 use crate::systems::timeline;
 
@@ -22,7 +24,9 @@ impl SimulationRunner {
         }
 
         timeline::advance_to_player_ready(world, &mut self.agents);
+        stream_chunks_around_player(world);
         self.player_action.run(world);
+        stream_chunks_around_player(world);
         self.advance_after_player_action_if_spent(world);
     }
 
@@ -31,6 +35,20 @@ impl SimulationRunner {
             timeline::advance_after_player_action_spent(world, &mut self.agents);
         }
     }
+}
+
+fn stream_chunks_around_player(world: &mut World) {
+    let player_position = {
+        let mut query = world.query_filtered::<&Position, With<Player>>();
+        query.iter(world).next().copied()
+    };
+    let Some(player_position) = player_position else {
+        return;
+    };
+
+    world
+        .resource_mut::<Map>()
+        .stream_chunks_near(TileCoord::from(player_position));
 }
 
 impl Default for SimulationRunner {

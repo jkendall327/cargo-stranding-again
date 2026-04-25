@@ -304,7 +304,7 @@ pub fn ascii_viewport(world: &mut World) -> Option<String> {
     camera.center_on(player_position, map.bounds());
 
     let mut rows = Vec::new();
-    for y in camera.y..(camera.y + camera.height).min(map.bounds().height) {
+    for y in camera.y..(camera.y + camera.height) {
         let mut row = String::new();
         for coord in map.visible_tiles(TileCoord::new(camera.x, y), camera.width, 1) {
             row.push(terrain_glyph(map, coord));
@@ -548,6 +548,31 @@ mod tests {
         let snapshot = game.snapshot().expect("headless game should have a player");
         assert_eq!(snapshot.turn, 1);
         assert!(snapshot.timeline > 0);
+    }
+
+    #[test]
+    fn player_can_walk_into_streamed_chunk() {
+        let mut game = HeadlessGame::new();
+        {
+            let world = game.world_mut();
+            let mut query = world.query_filtered::<&mut Position, With<Player>>();
+            let mut position = query
+                .iter_mut(world)
+                .next()
+                .expect("headless game should have a player");
+            *position = Position { x: 1, y: 31 };
+        }
+
+        game.step(PlayerAction::Move(Direction::West));
+        game.step(PlayerAction::Move(Direction::West));
+
+        let snapshot = game.snapshot().expect("headless game should have a player");
+        assert_eq!(snapshot.player_position, Position { x: -1, y: 31 });
+        assert!(game
+            .world()
+            .resource::<Map>()
+            .tile_at_coord(TileCoord::new(-1, 31))
+            .is_some());
     }
 
     #[test]

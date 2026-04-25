@@ -290,8 +290,18 @@ impl Camera {
     /// Centers the camera on an ECS position while clamping to finite map bounds.
     pub fn center_on(&mut self, position: Position, bounds: MapBounds) {
         let coord = TileCoord::from(position);
-        self.x = clamp_axis(coord.x - self.width / 2, self.width, bounds.width);
-        self.y = clamp_axis(coord.y - self.height / 2, self.height, bounds.height);
+        self.x = clamp_axis(
+            coord.x - self.width / 2,
+            self.width,
+            bounds.min_x,
+            bounds.max_x(),
+        );
+        self.y = clamp_axis(
+            coord.y - self.height / 2,
+            self.height,
+            bounds.min_y,
+            bounds.max_y(),
+        );
     }
 
     /// Returns the camera's top-left tile as a world tile coordinate.
@@ -313,11 +323,12 @@ impl Default for Camera {
     }
 }
 
-fn clamp_axis(origin: i32, view_size: i32, map_size: i32) -> i32 {
+fn clamp_axis(origin: i32, view_size: i32, min: i32, max: i32) -> i32 {
+    let map_size = max - min;
     if view_size >= map_size {
-        0
+        min
     } else {
-        origin.clamp(0, map_size - view_size)
+        origin.clamp(min, max - view_size)
     }
 }
 
@@ -329,32 +340,20 @@ mod tests {
     fn camera_centers_on_player_until_it_hits_map_edges() {
         let mut camera = Camera::square(31);
 
-        camera.center_on(
-            Position { x: 30, y: 20 },
-            MapBounds {
-                width: 60,
-                height: 40,
-            },
-        );
+        camera.center_on(Position { x: 30, y: 20 }, MapBounds::new(0, 0, 60, 40));
         assert_eq!((camera.x, camera.y), (15, 5));
 
-        camera.center_on(
-            Position { x: 2, y: 2 },
-            MapBounds {
-                width: 60,
-                height: 40,
-            },
-        );
+        camera.center_on(Position { x: 2, y: 2 }, MapBounds::new(0, 0, 60, 40));
         assert_eq!((camera.x, camera.y), (0, 0));
 
-        camera.center_on(
-            Position { x: 58, y: 38 },
-            MapBounds {
-                width: 60,
-                height: 40,
-            },
-        );
+        camera.center_on(Position { x: 58, y: 38 }, MapBounds::new(0, 0, 60, 40));
         assert_eq!((camera.x, camera.y), (29, 9));
+
+        camera.center_on(
+            Position { x: -14, y: -14 },
+            MapBounds::new(-16, -16, 76, 56),
+        );
+        assert_eq!((camera.x, camera.y), (-16, -16));
     }
 
     #[test]

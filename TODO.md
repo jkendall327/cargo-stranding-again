@@ -348,7 +348,8 @@ Goal: move from one fixed rectangle to deterministic, streamable world data.
 - [x] Keep initial implementation compatible with the current generated map.
   - [x] One chunk or a small fixed set of chunks is fine at first.
 - [x] Make procedural generation deterministic by seed and chunk coordinate.
-- [ ] Add chunk load/unload boundaries around the camera or player.
+- [x] Add chunk load boundaries around the camera or player.
+  - Unloading is deliberately deferred while generated chunks stay in memory.
 - [ ] Add persistence for visited/modified chunks.
   - [ ] Start with a simple save directory or single save file.
   - [ ] Persist only changed chunks if generation is deterministic.

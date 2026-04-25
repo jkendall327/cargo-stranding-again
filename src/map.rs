@@ -9,6 +9,7 @@ pub const CHUNK_WIDTH: i32 = 16;
 /// Height in world tiles for one map chunk.
 pub const CHUNK_HEIGHT: i32 = 16;
 pub const DEFAULT_MAP_SEED: u64 = 0xCA6E_057A;
+pub const CHUNK_STREAM_MARGIN_TILES: i32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Terrain {
@@ -118,6 +119,8 @@ pub struct Chunk {
 /// the map resolves each world tile to a chunk and local tile coordinate.
 #[derive(Resource, Clone, Debug)]
 pub struct Map {
+    min_x: i32,
+    min_y: i32,
     width: i32,
     height: i32,
     pub seed: u64,
@@ -131,8 +134,29 @@ pub struct Map {
 /// camera clamping and out-of-bounds tile lookup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MapBounds {
+    pub min_x: i32,
+    pub min_y: i32,
     pub width: i32,
     pub height: i32,
+}
+
+impl MapBounds {
+    pub fn new(min_x: i32, min_y: i32, width: i32, height: i32) -> Self {
+        Self {
+            min_x,
+            min_y,
+            width,
+            height,
+        }
+    }
+
+    pub fn max_x(self) -> i32 {
+        self.min_x + self.width
+    }
+
+    pub fn max_y(self) -> i32 {
+        self.min_y + self.height
+    }
 }
 
 /// Complete terrain data for one world tile.
@@ -221,11 +245,7 @@ pub fn generate_chunk(seed: u64, coord: ChunkCoord) -> Chunk {
             let elevation = generated_elevation(seed, world_x, world_y);
             chunk.set_elevation(local, elevation);
 
-            if terrain_noise < 5 {
-                chunk.set_terrain(local, Terrain::Water);
-                let depth_noise = deterministic_seeded_noise(seed, world_x, world_y, 1);
-                chunk.set_water_depth(local, if depth_noise < 35 { 3 } else { 1 });
-            } else if terrain_noise < 16 {
+            if terrain_noise < 14 {
                 chunk.set_terrain(local, Terrain::Mud);
             } else if terrain_noise > 91 {
                 chunk.set_terrain(local, Terrain::Rock);
@@ -306,10 +326,7 @@ impl Map {
 
     /// Returns the finite map dimensions in world tiles.
     pub fn bounds(&self) -> MapBounds {
-        MapBounds {
-            width: self.width,
-            height: self.height,
-        }
+        MapBounds::new(self.min_x, self.min_y, self.width, self.height)
     }
 
     /// Returns the depot's world tile coordinate.
@@ -319,7 +336,10 @@ impl Map {
 
     /// Returns true when `coord` is inside the finite prebaked world.
     pub fn in_bounds_coord(&self, coord: TileCoord) -> bool {
-        coord.x >= 0 && coord.y >= 0 && coord.x < self.width && coord.y < self.height
+        coord.x >= self.min_x
+            && coord.y >= self.min_y
+            && coord.x < self.max_x()
+            && coord.y < self.max_y()
     }
 
     /// Returns terrain at a world tile, or `None` outside the finite world.
@@ -385,19 +405,49 @@ impl Map {
         self.loaded_chunks.get_mut(&coord)
     }
 
-    /// Ensures an in-bounds finite chunk exists in loaded storage.
+    /// Ensures a chunk exists in loaded storage, generating it when absent.
     ///
-    /// This is deliberately finite-world scoped for now: chunks outside the
-    /// current prebaked map remain absent instead of being generated on demand.
+    /// Newly generated chunks expand the in-memory playable bounds. The
+    /// existing prebaked startup chunks are left untouched.
     pub fn ensure_chunk_loaded(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
-        if !self.chunk_coord_in_bounds(coord) {
-            return None;
+        let was_absent = !self.loaded_chunks.contains_key(&coord);
+        if was_absent {
+            self.expand_bounds_to_chunk(coord);
+            self.ensure_loaded_chunks_cover_bounds();
         }
 
         match self.loaded_chunks.entry(coord) {
             Entry::Occupied(entry) => Some(entry.into_mut()),
-            Entry::Vacant(entry) => Some(entry.insert(Chunk::new(coord))),
+            Entry::Vacant(entry) => Some(entry.insert(generate_chunk(self.seed, coord))),
         }
+    }
+
+    /// Loads neighboring chunks when `coord` gets close to a loaded edge.
+    pub fn stream_chunks_near(&mut self, coord: TileCoord) -> usize {
+        self.stream_chunks_near_with_margin(coord, CHUNK_STREAM_MARGIN_TILES)
+    }
+
+    fn stream_chunks_near_with_margin(&mut self, coord: TileCoord, margin: i32) -> usize {
+        let margin = margin.max(0);
+        let loaded_before = self.loaded_chunks.len();
+        let (chunk_coord, local_coord) = Self::split_tile_coord(coord);
+
+        self.ensure_chunk_loaded(chunk_coord);
+
+        if local_coord.x <= margin || coord.x - self.min_x <= margin {
+            self.ensure_chunk_loaded(ChunkCoord::new(chunk_coord.x - 1, chunk_coord.y));
+        }
+        if local_coord.x >= CHUNK_WIDTH - 1 - margin || self.max_x() - 1 - coord.x <= margin {
+            self.ensure_chunk_loaded(ChunkCoord::new(chunk_coord.x + 1, chunk_coord.y));
+        }
+        if local_coord.y <= margin || coord.y - self.min_y <= margin {
+            self.ensure_chunk_loaded(ChunkCoord::new(chunk_coord.x, chunk_coord.y - 1));
+        }
+        if local_coord.y >= CHUNK_HEIGHT - 1 - margin || self.max_y() - 1 - coord.y <= margin {
+            self.ensure_chunk_loaded(ChunkCoord::new(chunk_coord.x, chunk_coord.y + 1));
+        }
+
+        self.loaded_chunks.len() - loaded_before
     }
 
     /// Splits a world tile coordinate into chunk and chunk-local coordinates.
@@ -426,6 +476,8 @@ impl Map {
             }
         }
         Self {
+            min_x: 0,
+            min_y: 0,
             width,
             height,
             seed,
@@ -463,11 +515,45 @@ impl Map {
         self.loaded_chunk_mut(chunk_coord)
     }
 
-    fn chunk_coord_in_bounds(&self, coord: ChunkCoord) -> bool {
-        coord.x >= 0
-            && coord.y >= 0
-            && coord.x < chunk_span(self.width, CHUNK_WIDTH)
-            && coord.y < chunk_span(self.height, CHUNK_HEIGHT)
+    fn max_x(&self) -> i32 {
+        self.min_x + self.width
+    }
+
+    fn max_y(&self) -> i32 {
+        self.min_y + self.height
+    }
+
+    fn expand_bounds_to_chunk(&mut self, coord: ChunkCoord) {
+        let chunk_min_x = coord.x * CHUNK_WIDTH;
+        let chunk_min_y = coord.y * CHUNK_HEIGHT;
+        let min_x = self.min_x.min(chunk_min_x);
+        let min_y = self.min_y.min(chunk_min_y);
+        let max_x = self.max_x().max(chunk_min_x + CHUNK_WIDTH);
+        let max_y = self.max_y().max(chunk_min_y + CHUNK_HEIGHT);
+
+        self.min_x = min_x;
+        self.min_y = min_y;
+        self.width = max_x - min_x;
+        self.height = max_y - min_y;
+    }
+
+    fn ensure_loaded_chunks_cover_bounds(&mut self) {
+        let min_chunk_x = self.min_x.div_euclid(CHUNK_WIDTH);
+        let min_chunk_y = self.min_y.div_euclid(CHUNK_HEIGHT);
+        let max_chunk_x = (self.max_x() - 1).div_euclid(CHUNK_WIDTH);
+        let max_chunk_y = (self.max_y() - 1).div_euclid(CHUNK_HEIGHT);
+
+        for chunk_y in min_chunk_y..=max_chunk_y {
+            for chunk_x in min_chunk_x..=max_chunk_x {
+                let coord = ChunkCoord::new(chunk_x, chunk_y);
+                match self.loaded_chunks.entry(coord) {
+                    Entry::Occupied(_) => {}
+                    Entry::Vacant(entry) => {
+                        entry.insert(generate_chunk(self.seed, coord));
+                    }
+                }
+            }
+        }
     }
 
     fn generate_elevation(&mut self) {
@@ -537,10 +623,10 @@ pub struct VisibleTiles {
 
 impl VisibleTiles {
     fn new(origin: TileCoord, width: i32, height: i32, bounds: MapBounds) -> Self {
-        let start_x = origin.x.clamp(0, bounds.width);
-        let start_y = origin.y.clamp(0, bounds.height);
-        let end_x = (origin.x + width).clamp(0, bounds.width);
-        let end_y = (origin.y + height).clamp(0, bounds.height);
+        let start_x = origin.x.clamp(bounds.min_x, bounds.max_x());
+        let start_y = origin.y.clamp(bounds.min_y, bounds.max_y());
+        let end_x = (origin.x + width).clamp(bounds.min_x, bounds.max_x());
+        let end_y = (origin.y + height).clamp(bounds.min_y, bounds.max_y());
         Self {
             start_x,
             end_x,
@@ -647,6 +733,8 @@ mod tests {
         let map = Map::generate();
         let bounds = map.bounds();
 
+        assert_eq!(bounds.min_x, 0);
+        assert_eq!(bounds.min_y, 0);
         assert_eq!(bounds.width, MAP_WIDTH);
         assert_eq!(bounds.height, MAP_HEIGHT);
         assert_eq!(map.chunk_count(), 12);
@@ -767,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn ensuring_chunk_loaded_is_finite_world_scoped() {
+    fn ensuring_chunk_loaded_generates_absent_chunks_and_expands_bounds() {
         let mut map = Map::generate();
         let loaded_before = map.chunk_count();
 
@@ -777,9 +865,52 @@ mod tests {
         assert_eq!(chunk.coord(), ChunkCoord::new(3, 2));
         assert_eq!(map.chunk_count(), loaded_before);
 
-        assert!(map.ensure_chunk_loaded(ChunkCoord::new(4, 0)).is_none());
-        assert!(map.ensure_chunk_loaded(ChunkCoord::new(-1, 0)).is_none());
-        assert_eq!(map.chunk_count(), loaded_before);
+        let chunk = map
+            .ensure_chunk_loaded(ChunkCoord::new(-1, 0))
+            .expect("absent chunk should be generated");
+        assert_eq!(chunk.coord(), ChunkCoord::new(-1, 0));
+
+        let bounds = map.bounds();
+        assert_eq!(bounds.min_x, -16);
+        assert_eq!(bounds.max_x(), MAP_WIDTH);
+        assert!(map.chunk_count() > loaded_before);
+        assert!(map.tile_at_coord(TileCoord::new(-1, 0)).is_some());
+    }
+
+    #[test]
+    fn streaming_near_loaded_edges_generates_neighboring_chunks() {
+        let mut map = Map::generate();
+        let loaded_before = map.chunk_count();
+
+        let loaded = map.stream_chunks_near_with_margin(TileCoord::new(1, 20), 3);
+
+        assert!(loaded > 0);
+        assert!(map.chunk_count() > loaded_before);
+        assert!(map.loaded_chunk(ChunkCoord::new(-1, 1)).is_some());
+        assert!(map.tile_at_coord(TileCoord::new(-1, 20)).is_some());
+
+        let bounds = map.bounds();
+        assert_eq!(bounds.min_x, -16);
+        assert_eq!(bounds.max_x(), MAP_WIDTH);
+    }
+
+    #[test]
+    fn streaming_keeps_loaded_chunks_rectangular_for_rendering() {
+        let mut map = Map::generate();
+
+        map.stream_chunks_near_with_margin(TileCoord::new(1, 1), 3);
+        let bounds = map.bounds();
+
+        for coord in map.visible_tiles(
+            TileCoord::new(bounds.min_x, bounds.min_y),
+            bounds.width,
+            bounds.height,
+        ) {
+            assert!(
+                map.tile_at_coord(coord).is_some(),
+                "visible tile {coord:?} should have loaded chunk data"
+            );
+        }
     }
 
     #[test]
