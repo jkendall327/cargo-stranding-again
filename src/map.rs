@@ -1,7 +1,12 @@
+use std::collections::HashMap;
+
 use bevy_ecs::prelude::*;
 
 pub const MAP_WIDTH: i32 = 60;
 pub const MAP_HEIGHT: i32 = 40;
+pub const CHUNK_WIDTH: i32 = 16;
+pub const CHUNK_HEIGHT: i32 = 16;
+pub const DEFAULT_MAP_SEED: u64 = 0xCA6E_057A;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Terrain {
@@ -41,14 +46,57 @@ impl Terrain {
     }
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct TileCoord {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl TileCoord {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct ChunkCoord {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl ChunkCoord {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct LocalTileCoord {
+    pub x: i32,
+    pub y: i32,
+}
+
+impl LocalTileCoord {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Chunk {
+    coord: ChunkCoord,
+    tiles: Vec<Terrain>,
+    elevations: Vec<i16>,
+    water_depths: Vec<u8>,
+}
+
 #[derive(Resource, Clone, Debug)]
 pub struct Map {
     pub width: i32,
     pub height: i32,
-    tiles: Vec<Terrain>,
-    elevations: Vec<i16>,
-    water_depths: Vec<u8>,
-    pub depot: (i32, i32),
+    pub seed: u64,
+    chunks: HashMap<ChunkCoord, Chunk>,
+    pub depot: TileCoord,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,20 +113,63 @@ pub struct MovementEdge {
     pub elevation_delta: i16,
 }
 
+impl Chunk {
+    pub fn new(coord: ChunkCoord) -> Self {
+        let len = (CHUNK_WIDTH * CHUNK_HEIGHT) as usize;
+        Self {
+            coord,
+            tiles: vec![Terrain::Grass; len],
+            elevations: vec![0; len],
+            water_depths: vec![0; len],
+        }
+    }
+
+    pub fn coord(&self) -> ChunkCoord {
+        self.coord
+    }
+
+    fn tile_at(&self, local: LocalTileCoord) -> Option<TileInfo> {
+        self.index(local).map(|index| TileInfo {
+            terrain: self.tiles[index],
+            elevation: self.elevations[index],
+            water_depth: self.water_depths[index],
+        })
+    }
+
+    fn set_terrain(&mut self, local: LocalTileCoord, terrain: Terrain) {
+        if let Some(index) = self.index(local) {
+            self.tiles[index] = terrain;
+            if terrain != Terrain::Water {
+                self.water_depths[index] = 0;
+            }
+        }
+    }
+
+    fn set_elevation(&mut self, local: LocalTileCoord, elevation: i16) {
+        if let Some(index) = self.index(local) {
+            self.elevations[index] = elevation;
+        }
+    }
+
+    fn set_water_depth(&mut self, local: LocalTileCoord, depth: u8) {
+        if let Some(index) = self.index(local) {
+            self.water_depths[index] = depth;
+        }
+    }
+
+    fn index(&self, local: LocalTileCoord) -> Option<usize> {
+        (local.x >= 0 && local.y >= 0 && local.x < CHUNK_WIDTH && local.y < CHUNK_HEIGHT)
+            .then_some((local.y * CHUNK_WIDTH + local.x) as usize)
+    }
+}
+
 impl Map {
     pub fn generate() -> Self {
         let width = MAP_WIDTH;
         let height = MAP_HEIGHT;
-        let depot = (48, 30);
+        let depot = TileCoord::new(48, 30);
 
-        let mut map = Self {
-            width,
-            height,
-            tiles: vec![Terrain::Grass; (width * height) as usize],
-            elevations: vec![0; (width * height) as usize],
-            water_depths: vec![0; (width * height) as usize],
-            depot,
-        };
+        let mut map = Self::blank(width, height, DEFAULT_MAP_SEED, depot);
 
         map.generate_elevation();
 
@@ -86,9 +177,9 @@ impl Map {
             for x in 0..width {
                 let noise = deterministic_noise(x, y);
                 if noise < 7 {
-                    map.set(x, y, Terrain::Mud);
+                    map.set(TileCoord::new(x, y), Terrain::Mud);
                 } else if noise > 92 {
-                    map.set(x, y, Terrain::Rock);
+                    map.set(TileCoord::new(x, y), Terrain::Rock);
                 }
             }
         }
@@ -99,7 +190,8 @@ impl Map {
                     let dx = x - cx;
                     let dy = y - cy;
                     if dx * dx + dy * dy <= radius * radius {
-                        map.set(x, y, Terrain::Water);
+                        let coord = TileCoord::new(x, y);
+                        map.set(coord, Terrain::Water);
                         let distance_squared = dx * dx + dy * dy;
                         let inner_radius = (radius - 2).max(1);
                         let depth = if distance_squared <= inner_radius * inner_radius {
@@ -107,59 +199,83 @@ impl Map {
                         } else {
                             1
                         };
-                        map.set_water_depth(x, y, depth);
+                        map.set_water_depth(coord, depth);
                     }
                 }
             }
         }
 
         for x in 5..55 {
-            map.set(x, 31, Terrain::Road);
-            map.set_water_depth(x, 31, 0);
+            let coord = TileCoord::new(x, 31);
+            map.set(coord, Terrain::Road);
+            map.set_water_depth(coord, 0);
         }
         for y in 8..32 {
-            map.set(48, y, Terrain::Road);
-            map.set_water_depth(48, y, 0);
+            let coord = TileCoord::new(48, y);
+            map.set(coord, Terrain::Road);
+            map.set_water_depth(coord, 0);
         }
         for x in 8..22 {
-            map.set(x, 12, Terrain::Road);
-            map.set_water_depth(x, 12, 0);
+            let coord = TileCoord::new(x, 12);
+            map.set(coord, Terrain::Road);
+            map.set_water_depth(coord, 0);
         }
         map.flatten_roads();
 
-        map.set(depot.0, depot.1, Terrain::Depot);
-        map.set_water_depth(depot.0, depot.1, 0);
+        map.set(depot, Terrain::Depot);
+        map.set_water_depth(depot, 0);
         map
     }
 
+    pub fn in_bounds_coord(&self, coord: TileCoord) -> bool {
+        coord.x >= 0 && coord.y >= 0 && coord.x < self.width && coord.y < self.height
+    }
+
     pub fn in_bounds(&self, x: i32, y: i32) -> bool {
-        x >= 0 && y >= 0 && x < self.width && y < self.height
+        self.in_bounds_coord(TileCoord::new(x, y))
+    }
+
+    pub fn terrain_at_coord(&self, coord: TileCoord) -> Option<Terrain> {
+        self.tile_at_coord(coord).map(|tile| tile.terrain)
     }
 
     pub fn terrain_at(&self, x: i32, y: i32) -> Option<Terrain> {
-        self.in_bounds(x, y)
-            .then(|| self.tiles[(y * self.width + x) as usize])
+        self.terrain_at_coord(TileCoord::new(x, y))
+    }
+
+    pub fn elevation_at_coord(&self, coord: TileCoord) -> Option<i16> {
+        self.tile_at_coord(coord).map(|tile| tile.elevation)
     }
 
     pub fn elevation_at(&self, x: i32, y: i32) -> Option<i16> {
-        self.index(x, y).map(|index| self.elevations[index])
+        self.elevation_at_coord(TileCoord::new(x, y))
+    }
+
+    pub fn water_depth_at_coord(&self, coord: TileCoord) -> Option<u8> {
+        self.tile_at_coord(coord).map(|tile| tile.water_depth)
     }
 
     pub fn water_depth_at(&self, x: i32, y: i32) -> Option<u8> {
-        self.index(x, y).map(|index| self.water_depths[index])
+        self.water_depth_at_coord(TileCoord::new(x, y))
+    }
+
+    pub fn tile_at_coord(&self, coord: TileCoord) -> Option<TileInfo> {
+        if !self.in_bounds_coord(coord) {
+            return None;
+        }
+        let (chunk_coord, local_coord) = Self::split_tile_coord(coord);
+        self.chunks
+            .get(&chunk_coord)
+            .and_then(|chunk| chunk.tile_at(local_coord))
     }
 
     pub fn tile_at(&self, x: i32, y: i32) -> Option<TileInfo> {
-        self.index(x, y).map(|index| TileInfo {
-            terrain: self.tiles[index],
-            elevation: self.elevations[index],
-            water_depth: self.water_depths[index],
-        })
+        self.tile_at_coord(TileCoord::new(x, y))
     }
 
-    pub fn movement_edge(&self, origin: (i32, i32), target: (i32, i32)) -> Option<MovementEdge> {
-        let origin = self.tile_at(origin.0, origin.1)?;
-        let target = self.tile_at(target.0, target.1)?;
+    pub fn movement_edge(&self, origin: TileCoord, target: TileCoord) -> Option<MovementEdge> {
+        let origin = self.tile_at_coord(origin)?;
+        let target = self.tile_at_coord(target)?;
         Some(MovementEdge {
             origin,
             target,
@@ -171,30 +287,63 @@ impl Map {
         self.terrain_at(x, y).is_some_and(Terrain::passable)
     }
 
-    fn set(&mut self, x: i32, y: i32, terrain: Terrain) {
-        if let Some(index) = self.index(x, y) {
-            self.tiles[index] = terrain;
-            if terrain != Terrain::Water {
-                self.water_depths[index] = 0;
+    pub fn split_tile_coord(coord: TileCoord) -> (ChunkCoord, LocalTileCoord) {
+        (
+            ChunkCoord::new(
+                coord.x.div_euclid(CHUNK_WIDTH),
+                coord.y.div_euclid(CHUNK_HEIGHT),
+            ),
+            LocalTileCoord::new(
+                coord.x.rem_euclid(CHUNK_WIDTH),
+                coord.y.rem_euclid(CHUNK_HEIGHT),
+            ),
+        )
+    }
+
+    fn blank(width: i32, height: i32, seed: u64, depot: TileCoord) -> Self {
+        let mut chunks = HashMap::new();
+        for chunk_y in 0..chunk_span(height, CHUNK_HEIGHT) {
+            for chunk_x in 0..chunk_span(width, CHUNK_WIDTH) {
+                let coord = ChunkCoord::new(chunk_x, chunk_y);
+                chunks.insert(coord, Chunk::new(coord));
             }
         }
-    }
-
-    fn set_elevation(&mut self, x: i32, y: i32, elevation: i16) {
-        if let Some(index) = self.index(x, y) {
-            self.elevations[index] = elevation;
+        Self {
+            width,
+            height,
+            seed,
+            chunks,
+            depot,
         }
     }
 
-    fn set_water_depth(&mut self, x: i32, y: i32, depth: u8) {
-        if let Some(index) = self.index(x, y) {
-            self.water_depths[index] = depth;
+    fn set(&mut self, coord: TileCoord, terrain: Terrain) {
+        if let Some(chunk) = self.chunk_mut(coord) {
+            let (_, local) = Self::split_tile_coord(coord);
+            chunk.set_terrain(local, terrain);
         }
     }
 
-    fn index(&self, x: i32, y: i32) -> Option<usize> {
-        self.in_bounds(x, y)
-            .then_some((y * self.width + x) as usize)
+    fn set_elevation(&mut self, coord: TileCoord, elevation: i16) {
+        if let Some(chunk) = self.chunk_mut(coord) {
+            let (_, local) = Self::split_tile_coord(coord);
+            chunk.set_elevation(local, elevation);
+        }
+    }
+
+    fn set_water_depth(&mut self, coord: TileCoord, depth: u8) {
+        if let Some(chunk) = self.chunk_mut(coord) {
+            let (_, local) = Self::split_tile_coord(coord);
+            chunk.set_water_depth(local, depth);
+        }
+    }
+
+    fn chunk_mut(&mut self, coord: TileCoord) -> Option<&mut Chunk> {
+        if !self.in_bounds_coord(coord) {
+            return None;
+        }
+        let (chunk_coord, _) = Self::split_tile_coord(coord);
+        self.chunks.get_mut(&chunk_coord)
     }
 
     fn generate_elevation(&mut self) {
@@ -209,7 +358,7 @@ impl Map {
                     }
                 }
                 let averaged = total / samples;
-                self.set_elevation(x, y, (averaged / 11).clamp(0, 9) as i16);
+                self.set_elevation(TileCoord::new(x, y), (averaged / 11).clamp(0, 9) as i16);
             }
         }
     }
@@ -217,7 +366,8 @@ impl Map {
     fn flatten_roads(&mut self) {
         for y in 0..self.height {
             for x in 0..self.width {
-                let Some(terrain) = self.terrain_at(x, y) else {
+                let coord = TileCoord::new(x, y);
+                let Some(terrain) = self.terrain_at_coord(coord) else {
                     continue;
                 };
                 if !matches!(terrain, Terrain::Road | Terrain::Depot) {
@@ -226,19 +376,24 @@ impl Map {
 
                 let mut total = 0;
                 let mut samples = 0;
-                for (neighbor_x, neighbor_y) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                for neighbor in [
+                    TileCoord::new(x - 1, y),
+                    TileCoord::new(x + 1, y),
+                    TileCoord::new(x, y - 1),
+                    TileCoord::new(x, y + 1),
+                ] {
                     if matches!(
-                        self.terrain_at(neighbor_x, neighbor_y),
+                        self.terrain_at_coord(neighbor),
                         Some(Terrain::Road | Terrain::Depot)
                     ) {
-                        if let Some(elevation) = self.elevation_at(neighbor_x, neighbor_y) {
+                        if let Some(elevation) = self.elevation_at_coord(neighbor) {
                             total += elevation;
                             samples += 1;
                         }
                     }
                 }
                 if samples > 0 {
-                    self.set_elevation(x, y, total / samples);
+                    self.set_elevation(coord, total / samples);
                 }
             }
         }
@@ -253,27 +408,36 @@ impl Map {
         terrain: Terrain,
         elevation: i16,
     ) -> Self {
-        Self {
-            width,
-            height,
-            tiles: vec![terrain; (width * height) as usize],
-            elevations: vec![elevation; (width * height) as usize],
-            water_depths: vec![0; (width * height) as usize],
-            depot: (0, 0),
+        let mut map = Self::blank(width, height, DEFAULT_MAP_SEED, TileCoord::new(0, 0));
+        for y in 0..height {
+            for x in 0..width {
+                let coord = TileCoord::new(x, y);
+                map.set(coord, terrain);
+                map.set_elevation(coord, elevation);
+            }
         }
+        map
     }
 
     pub(crate) fn set_for_tests(&mut self, x: i32, y: i32, terrain: Terrain) {
-        self.set(x, y, terrain);
+        self.set(TileCoord::new(x, y), terrain);
     }
 
     pub(crate) fn set_elevation_for_tests(&mut self, x: i32, y: i32, elevation: i16) {
-        self.set_elevation(x, y, elevation);
+        self.set_elevation(TileCoord::new(x, y), elevation);
     }
 
     pub(crate) fn set_water_depth_for_tests(&mut self, x: i32, y: i32, depth: u8) {
-        self.set_water_depth(x, y, depth);
+        self.set_water_depth(TileCoord::new(x, y), depth);
     }
+
+    fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+}
+
+fn chunk_span(size: i32, chunk_size: i32) -> i32 {
+    size.div_euclid(chunk_size) + i32::from(size.rem_euclid(chunk_size) != 0)
 }
 
 fn deterministic_noise(x: i32, y: i32) -> i32 {
@@ -286,13 +450,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_heightfields_match_map_dimensions() {
+    fn generated_map_allocates_chunks_for_finite_bounds() {
         let map = Map::generate();
-        let expected_len = (map.width * map.height) as usize;
 
-        assert_eq!(map.tiles.len(), expected_len);
-        assert_eq!(map.elevations.len(), expected_len);
-        assert_eq!(map.water_depths.len(), expected_len);
+        assert_eq!(map.width, MAP_WIDTH);
+        assert_eq!(map.height, MAP_HEIGHT);
+        assert_eq!(map.chunk_count(), 12);
+    }
+
+    #[test]
+    fn tile_coordinates_split_across_chunk_boundaries() {
+        assert_eq!(
+            Map::split_tile_coord(TileCoord::new(15, 15)),
+            (ChunkCoord::new(0, 0), LocalTileCoord::new(15, 15))
+        );
+        assert_eq!(
+            Map::split_tile_coord(TileCoord::new(16, 16)),
+            (ChunkCoord::new(1, 1), LocalTileCoord::new(0, 0))
+        );
+        assert_eq!(
+            Map::split_tile_coord(TileCoord::new(-1, -1)),
+            (ChunkCoord::new(-1, -1), LocalTileCoord::new(15, 15))
+        );
     }
 
     #[test]
@@ -300,9 +479,43 @@ mod tests {
         let first = Map::generate();
         let second = Map::generate();
 
-        for (x, y) in [(0, 0), (6, 6), (13, 10), (48, 30), (59, 39)] {
-            assert_eq!(first.tile_at(x, y), second.tile_at(x, y));
+        for coord in [
+            TileCoord::new(0, 0),
+            TileCoord::new(6, 6),
+            TileCoord::new(13, 10),
+            TileCoord::new(48, 30),
+            TileCoord::new(59, 39),
+        ] {
+            assert_eq!(first.tile_at_coord(coord), second.tile_at_coord(coord));
         }
+    }
+
+    #[test]
+    fn lookups_cross_chunk_boundaries() {
+        let mut map = Map::flat_for_tests(32, 32, Terrain::Grass, 4);
+        map.set_for_tests(15, 16, Terrain::Road);
+        map.set_elevation_for_tests(15, 16, 7);
+        map.set_water_depth_for_tests(16, 15, 1);
+
+        assert_eq!(
+            map.terrain_at_coord(TileCoord::new(15, 16)),
+            Some(Terrain::Road)
+        );
+        assert_eq!(map.elevation_at_coord(TileCoord::new(15, 16)), Some(7));
+        assert_eq!(map.water_depth_at_coord(TileCoord::new(16, 15)), Some(1));
+        assert!(map
+            .movement_edge(TileCoord::new(15, 15), TileCoord::new(16, 15))
+            .is_some());
+    }
+
+    #[test]
+    fn finite_world_lookups_outside_bounds_are_absent() {
+        let map = Map::generate();
+
+        assert_eq!(map.tile_at_coord(TileCoord::new(-1, 0)), None);
+        assert_eq!(map.tile_at_coord(TileCoord::new(0, -1)), None);
+        assert_eq!(map.tile_at_coord(TileCoord::new(MAP_WIDTH, 0)), None);
+        assert_eq!(map.tile_at_coord(TileCoord::new(0, MAP_HEIGHT)), None);
     }
 
     #[test]
@@ -312,7 +525,7 @@ mod tests {
         for y in 0..map.height {
             for x in 0..map.width {
                 let tile = map
-                    .tile_at(x, y)
+                    .tile_at_coord(TileCoord::new(x, y))
                     .expect("generated coordinate is in bounds");
                 if tile.terrain == Terrain::Water {
                     assert!(tile.water_depth > 0);

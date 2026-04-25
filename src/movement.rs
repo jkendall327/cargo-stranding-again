@@ -2,7 +2,7 @@ use bevy_ecs::prelude::Entity;
 
 use crate::components::Position;
 use crate::energy::movement_energy_cost;
-use crate::map::{Map, Terrain};
+use crate::map::{Map, Terrain, TileCoord};
 use crate::resources::Direction;
 
 pub const MAX_WALKABLE_UP_STEP: i16 = 2;
@@ -117,7 +117,9 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
         x: request.origin.x + requested_delta.0,
         y: request.origin.y + requested_delta.1,
     };
-    let terrain = map.terrain_at(target.x, target.y);
+    let origin_coord = TileCoord::new(request.origin.x, request.origin.y);
+    let target_coord = TileCoord::new(target.x, target.y);
+    let terrain = map.terrain_at_coord(target_coord);
     let mut result = MovementResult {
         entity: request.entity,
         mode: request.mode,
@@ -126,18 +128,17 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
         origin: request.origin,
         target,
         terrain,
-        origin_elevation: map.elevation_at(request.origin.x, request.origin.y),
-        target_elevation: map.elevation_at(target.x, target.y),
+        origin_elevation: map.elevation_at_coord(origin_coord),
+        target_elevation: map.elevation_at_coord(target_coord),
         elevation_delta: 0,
-        water_depth: map.water_depth_at(target.x, target.y),
+        water_depth: map.water_depth_at_coord(target_coord),
         stamina_delta: 0.0,
         turn_cost: 0,
         cooldown_cost: 0,
         energy_cost: 0,
     };
 
-    let Some(edge) = map.movement_edge((request.origin.x, request.origin.y), (target.x, target.y))
-    else {
+    let Some(edge) = map.movement_edge(origin_coord, target_coord) else {
         return MovementOutcome::Blocked(result);
     };
     let terrain = edge.target.terrain;

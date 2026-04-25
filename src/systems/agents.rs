@@ -104,7 +104,7 @@ pub fn agent_jobs(
                     }
                 }
                 JobPhase::GoToDepot => {
-                    if position.x == map.depot.0 && position.y == map.depot.1 {
+                    if position.x == map.depot.x && position.y == map.depot.y {
                         *parcel_state = ParcelState::Delivered;
                         cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
                         clock.delivered_parcels += 1;
@@ -126,8 +126,8 @@ pub fn agent_jobs(
                         cargo.current_weight,
                         cargo.max_weight,
                         Position {
-                            x: map.depot.0,
-                            y: map.depot.1,
+                            x: map.depot.x,
+                            y: map.depot.y,
                         },
                     ) {
                         velocity.dx = moved.actual_delta.0;
@@ -260,15 +260,15 @@ mod tests {
             &mut world,
             0,
             Position {
-                x: depot.0,
-                y: depot.1,
+                x: depot.x,
+                y: depot.y,
             },
         );
         spawn_test_parcel(
             &mut world,
             Position {
-                x: depot.0,
-                y: depot.1,
+                x: depot.x,
+                y: depot.y,
             },
         );
 
