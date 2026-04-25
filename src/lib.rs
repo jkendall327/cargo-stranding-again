@@ -1,4 +1,5 @@
 pub mod app;
+pub mod cargo;
 pub mod components;
 pub mod energy;
 pub mod headless;

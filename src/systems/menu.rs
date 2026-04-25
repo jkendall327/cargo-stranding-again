@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{CargoParcel, ParcelState, Player};
+use crate::cargo::player_carried_parcel_count;
 use crate::resources::{
     GameScreen, InventoryAction, InventoryIntent, InventoryMenuState, MenuAction, MenuInputState,
     PauseMenuEntry, PauseMenuState,
@@ -39,13 +39,13 @@ pub fn menu_navigation(world: &mut World) {
             }
         }
         (GameScreen::InventoryMenu, MenuAction::MoveSelectionUp) => {
-            let item_count = player_carried_parcels(world).len();
+            let item_count = player_carried_parcel_count(world);
             world
                 .resource_mut::<InventoryMenuState>()
                 .select_previous(item_count);
         }
         (GameScreen::InventoryMenu, MenuAction::MoveSelectionDown) => {
-            let item_count = player_carried_parcels(world).len();
+            let item_count = player_carried_parcel_count(world);
             world
                 .resource_mut::<InventoryMenuState>()
                 .select_next(item_count);
@@ -57,38 +57,10 @@ pub fn menu_navigation(world: &mut World) {
     }
 }
 
-fn player_carried_parcels(world: &mut World) -> Vec<Entity> {
-    let Some(player_entity) = player_entity(world) else {
-        return Vec::new();
-    };
-    player_carried_parcels_for(world, player_entity)
-}
-
-fn player_entity(world: &mut World) -> Option<Entity> {
-    let mut player_query = world.query_filtered::<Entity, With<Player>>();
-    player_query.iter(world).next()
-}
-
-fn player_carried_parcels_for(world: &mut World, player_entity: Entity) -> Vec<Entity> {
-    let mut parcel_query = world.query_filtered::<(Entity, &ParcelState), With<CargoParcel>>();
-    let mut parcels = parcel_query
-        .iter(world)
-        .filter_map(|(entity, state)| {
-            if *state == ParcelState::CarriedBy(player_entity) {
-                Some(entity)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    parcels.sort_by_key(|entity| entity.to_bits());
-    parcels
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::{ActionEnergy, Cargo, Position};
+    use crate::components::{ActionEnergy, Cargo, CargoParcel, ParcelState, Player, Position};
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
     use crate::simulation::SimulationRunner;
     use crate::systems::inventory::inventory_actions;

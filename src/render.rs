@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
+use crate::cargo::player_carried_parcels;
 use crate::components::*;
 use crate::map::{Map, Terrain, TileCoord};
 use crate::resources::{
@@ -449,7 +450,7 @@ fn draw_inventory_menu(world: &mut World) {
     draw_text("Inventory", panel_x + 42.0, y, 34.0, WHITE);
     y += 50.0;
 
-    let entries = inventory_entries(world);
+    let entries = player_carried_parcels(world);
     if entries.is_empty() {
         draw_text(
             "No carried parcels.",
@@ -467,39 +468,6 @@ fn draw_inventory_menu(world: &mut World) {
         draw_menu_entry(panel_x + 42.0, y, &label, selected_index == index);
         y += 38.0;
     }
-}
-
-struct InventoryEntry {
-    entity: Entity,
-    weight: f32,
-}
-
-fn inventory_entries(world: &mut World) -> Vec<InventoryEntry> {
-    let Some(player_entity) = player_entity(world) else {
-        return Vec::new();
-    };
-
-    let mut query = world.query::<(Entity, &CargoParcel, &ParcelState)>();
-    let mut entries = query
-        .iter(world)
-        .filter_map(|(entity, parcel, state)| {
-            if *state == ParcelState::CarriedBy(player_entity) {
-                Some(InventoryEntry {
-                    entity,
-                    weight: parcel.weight,
-                })
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.entity.to_bits());
-    entries
-}
-
-fn player_entity(world: &mut World) -> Option<Entity> {
-    let mut query = world.query_filtered::<Entity, With<Player>>();
-    query.iter(world).next()
 }
 
 fn draw_options_menu() {
