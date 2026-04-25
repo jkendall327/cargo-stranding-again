@@ -371,24 +371,24 @@ Goal: support cliffs, deep water, falling, climbing, ropes, rappelling, and slop
 
 - [ ] Decide the verticality model before changing `Position`.
   - [ ] Option A: discrete z-levels (`Position { x, y, z }`).
-  - [ ] Option B: 2D grid plus elevation/depth fields.
+  - [X] Option B: 2D grid plus elevation/depth fields.
   - [ ] Likely target: both. Tile columns have elevation/depth; entities can have vertical state.
-- [ ] Add tile elevation/depth first.
-  - [ ] elevation
-  - [ ] water depth
-  - [ ] slope / grade derived from neighboring elevation
+- [x] Add tile elevation/depth first.
+  - [x] elevation
+  - [x] water depth
+  - [x] slope / grade derived from neighboring elevation
 - [ ] Make movement outcomes account for slope.
-  - [ ] Uphill costs more stamina.
+  - [x] Uphill costs more stamina.
   - [ ] Downhill can increase momentum or fall risk.
-  - [ ] Steep cliffs block normal walking.
+  - [x] Steep cliffs block normal walking.
 - [ ] Add vertical movement states later.
   - [ ] `Climbing`
   - [ ] `Rappelling`
   - [ ] `Falling`
   - [ ] `Swimming`
 - [ ] Add rope/climbing entities only when there is an interaction loop for them.
-- [ ] Update rendering with enough visual information to debug elevation.
-- [ ] Add tests for cliff blocking, slope costs, and water depth behavior.
+- [x] Update rendering with enough visual information to debug elevation.
+- [x] Add tests for cliff blocking, slope costs, and water depth behavior.
 
 Note:
 
