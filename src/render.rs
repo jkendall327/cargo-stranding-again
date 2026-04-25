@@ -108,9 +108,15 @@ fn draw_viewport_frame(camera: Camera) {
 fn draw_map(map: &Map, camera: Camera) {
     for y in camera.y..(camera.y + camera.height).min(map.height) {
         for x in camera.x..(camera.x + camera.width).min(map.width) {
-            let terrain = map.terrain_at(x, y).expect("map iteration is in bounds");
+            let tile = map.tile_at(x, y).expect("map iteration is in bounds");
             let (px, py) = tile_to_screen(camera, x, y);
-            draw_rectangle(px, py, TILE_SIZE, TILE_SIZE, terrain_color(terrain));
+            draw_rectangle(
+                px,
+                py,
+                TILE_SIZE,
+                TILE_SIZE,
+                terrain_color(tile.terrain, tile.elevation, tile.water_depth),
+            );
             draw_rectangle_lines(
                 px,
                 py,
@@ -120,9 +126,25 @@ fn draw_map(map: &Map, camera: Camera) {
                 Color::from_rgba(0, 0, 0, 45),
             );
 
-            if matches!(terrain_glyph(terrain), "D" | "w" | "^") {
+            draw_text(
+                &tile.elevation.to_string(),
+                px + 1.5,
+                py + 7.0,
+                8.0,
+                Color::from_rgba(245, 245, 235, 175),
+            );
+
+            if tile.water_depth > 0 {
                 draw_text(
-                    terrain_glyph(terrain),
+                    &tile.water_depth.to_string(),
+                    px + 10.0,
+                    py + 14.0,
+                    8.0,
+                    Color::from_rgba(210, 235, 255, 210),
+                );
+            } else if matches!(terrain_glyph(tile.terrain), "D" | "^") {
+                draw_text(
+                    terrain_glyph(tile.terrain),
                     px + 4.0,
                     py + 12.5,
                     14.0,
@@ -133,14 +155,28 @@ fn draw_map(map: &Map, camera: Camera) {
     }
 }
 
-fn terrain_color(terrain: Terrain) -> Color {
-    match terrain {
+fn terrain_color(terrain: Terrain, elevation: i16, water_depth: u8) -> Color {
+    let base = match terrain {
         Terrain::Grass => Color::from_rgba(64, 128, 72, 255),
         Terrain::Mud => Color::from_rgba(104, 75, 48, 255),
         Terrain::Rock => Color::from_rgba(92, 96, 100, 255),
         Terrain::Water => Color::from_rgba(34, 92, 138, 255),
         Terrain::Road => Color::from_rgba(150, 126, 78, 255),
         Terrain::Depot => Color::from_rgba(214, 174, 68, 255),
+    };
+    if terrain == Terrain::Water {
+        shade_color(base, -(f32::from(water_depth) * 0.09))
+    } else {
+        shade_color(base, (f32::from(elevation) - 4.5) * 0.045)
+    }
+}
+
+fn shade_color(color: Color, amount: f32) -> Color {
+    Color {
+        r: (color.r + amount).clamp(0.0, 1.0),
+        g: (color.g + amount).clamp(0.0, 1.0),
+        b: (color.b + amount).clamp(0.0, 1.0),
+        a: color.a,
     }
 }
 
@@ -316,6 +352,20 @@ fn draw_ui(world: &mut World, camera: Camera) {
         &mut y,
         &format!("Player: {}, {}", player_position.x, player_position.y),
     );
+    {
+        let map = world.resource::<Map>();
+        let elevation = map
+            .elevation_at(player_position.x, player_position.y)
+            .unwrap_or_default();
+        let water_depth = map
+            .water_depth_at(player_position.x, player_position.y)
+            .unwrap_or_default();
+        ui_line(
+            ui_x,
+            &mut y,
+            &format!("Elevation: {elevation} | water depth: {water_depth}"),
+        );
+    }
     ui_line(
         ui_x,
         &mut y,

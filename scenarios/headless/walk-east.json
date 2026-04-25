@@ -4,11 +4,13 @@
   "commands": ["east"],
   "expect": {
     "turn": 1,
-    "timeline": 100,
+    "timeline": 115,
     "player_position": {
       "x": 7,
       "y": 6
     },
+    "player_elevation": 3,
+    "player_water_depth": 0,
     "player_movement_mode": "walking",
     "player_stamina": 35.0,
     "loose_parcels": 3,

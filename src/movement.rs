@@ -5,6 +5,13 @@ use crate::energy::movement_energy_cost;
 use crate::map::{Map, Terrain};
 use crate::resources::Direction;
 
+pub const MAX_WALKABLE_UP_STEP: i16 = 2;
+pub const MAX_WALKABLE_DOWN_STEP: i16 = 3;
+pub const SHALLOW_WATER_MAX_DEPTH: u8 = 1;
+const UPHILL_STAMINA_COST_PER_LEVEL: f32 = 1.25;
+const DOWNHILL_RISK_STAMINA_COST_PER_LEVEL: f32 = 0.5;
+const SLOPE_ENERGY_COST_PER_LEVEL: f32 = 0.15;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MovementMode {
     Walking,
@@ -60,6 +67,10 @@ pub struct MovementResult {
     pub origin: Position,
     pub target: Position,
     pub terrain: Option<Terrain>,
+    pub origin_elevation: Option<i16>,
+    pub target_elevation: Option<i16>,
+    pub elevation_delta: i16,
+    pub water_depth: Option<u8>,
     pub stamina_delta: f32,
     pub turn_cost: u32,
     pub cooldown_cost: u32,
@@ -115,20 +126,33 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
         origin: request.origin,
         target,
         terrain,
+        origin_elevation: map.elevation_at(request.origin.x, request.origin.y),
+        target_elevation: map.elevation_at(target.x, target.y),
+        elevation_delta: 0,
+        water_depth: map.water_depth_at(target.x, target.y),
         stamina_delta: 0.0,
         turn_cost: 0,
         cooldown_cost: 0,
         energy_cost: 0,
     };
 
-    let Some(terrain) = terrain else {
+    let Some(edge) = map.movement_edge((request.origin.x, request.origin.y), (target.x, target.y))
+    else {
         return MovementOutcome::Blocked(result);
     };
-    if !map.is_passable(target.x, target.y) {
+    let terrain = edge.target.terrain;
+    result.terrain = Some(terrain);
+    result.origin_elevation = Some(edge.origin.elevation);
+    result.target_elevation = Some(edge.target.elevation);
+    result.elevation_delta = edge.elevation_delta;
+    result.water_depth = Some(edge.target.water_depth);
+
+    if !edge_is_walkable(edge) {
         return MovementOutcome::Blocked(result);
     }
 
-    result.stamina_delta = stamina_delta_for(terrain, request.mode, request.cargo);
+    result.stamina_delta =
+        stamina_delta_for(terrain, request.mode, request.cargo) + slope_stamina_delta(edge);
     if let Some(stamina) = request.stamina {
         let available_stamina = stamina.current.clamp(0.0, stamina.max);
         if result.stamina_delta.is_sign_negative() && available_stamina < result.stamina_delta.abs()
@@ -140,8 +164,20 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
     result.actual_delta = requested_delta;
     result.turn_cost = 1;
     result.cooldown_cost = movement_cooldown_cost(terrain, request.mode);
-    result.energy_cost = movement_energy_cost(terrain, request.mode);
+    result.energy_cost =
+        slope_adjusted_energy_cost(movement_energy_cost(terrain, request.mode), edge);
     MovementOutcome::Moved(result)
+}
+
+fn edge_is_walkable(edge: crate::map::MovementEdge) -> bool {
+    if edge.target.terrain == Terrain::Water {
+        edge.target.water_depth <= SHALLOW_WATER_MAX_DEPTH
+    } else if !edge.target.terrain.passable() {
+        false
+    } else {
+        edge.elevation_delta <= MAX_WALKABLE_UP_STEP
+            && edge.elevation_delta >= -MAX_WALKABLE_DOWN_STEP
+    }
 }
 
 pub fn terrain_cooldown_cost(terrain: Terrain) -> u32 {
@@ -185,6 +221,21 @@ fn stamina_delta_for(terrain: Terrain, mode: MovementMode, cargo: CargoLoad) -> 
     }
 }
 
+fn slope_stamina_delta(edge: crate::map::MovementEdge) -> f32 {
+    if edge.elevation_delta > 0 {
+        -(f32::from(edge.elevation_delta) * UPHILL_STAMINA_COST_PER_LEVEL)
+    } else if edge.elevation_delta < -1 {
+        -((f32::from(edge.elevation_delta.abs()) - 1.0) * DOWNHILL_RISK_STAMINA_COST_PER_LEVEL)
+    } else {
+        0.0
+    }
+}
+
+fn slope_adjusted_energy_cost(base: u32, edge: crate::map::MovementEdge) -> u32 {
+    let multiplier = 1.0 + f32::from(edge.elevation_delta.abs()) * SLOPE_ENERGY_COST_PER_LEVEL;
+    ((base as f32) * multiplier).round().max(1.0) as u32
+}
+
 fn cargo_load_factor(cargo: CargoLoad) -> f32 {
     1.0 + cargo.current_weight / cargo.max_weight.max(1.0)
 }
@@ -204,26 +255,10 @@ mod tests {
         }
     }
 
-    fn find_target_terrain(map: &Map, terrain: Terrain) -> (Position, Direction) {
-        for y in 0..map.height {
-            for x in 0..map.width {
-                if map.terrain_at(x, y) != Some(terrain) {
-                    continue;
-                }
-
-                for (direction, start) in [
-                    (Direction::East, Position { x: x - 1, y }),
-                    (Direction::West, Position { x: x + 1, y }),
-                    (Direction::South, Position { x, y: y - 1 }),
-                    (Direction::North, Position { x, y: y + 1 }),
-                ] {
-                    if map.in_bounds(start.x, start.y) {
-                        return (start, direction);
-                    }
-                }
-            }
-        }
-        panic!("test map should contain reachable {terrain:?}");
+    fn map_with_target_terrain(terrain: Terrain) -> Map {
+        let mut map = Map::flat_for_tests(4, 4, Terrain::Grass, 4);
+        map.set_for_tests(1, 0, terrain);
+        map
     }
 
     #[test]
@@ -242,10 +277,11 @@ mod tests {
 
     #[test]
     fn water_blocks_movement() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Water);
+        let mut map = map_with_target_terrain(Terrain::Water);
+        map.set_water_depth_for_tests(1, 0, 3);
 
-        let outcome = resolve_movement(&map, request_from(start, direction));
+        let outcome =
+            resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
 
         let result = outcome.result();
         assert!(matches!(outcome, MovementOutcome::Blocked(_)));
@@ -255,10 +291,10 @@ mod tests {
 
     #[test]
     fn grass_is_stamina_neutral() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Grass);
+        let map = map_with_target_terrain(Terrain::Grass);
 
-        let outcome = resolve_movement(&map, request_from(start, direction));
+        let outcome =
+            resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
 
         let result = outcome.moved().expect("grass should be passable");
         assert_eq!(result.terrain, Some(Terrain::Grass));
@@ -268,10 +304,10 @@ mod tests {
 
     #[test]
     fn road_restores_stamina() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Road);
+        let map = map_with_target_terrain(Terrain::Road);
 
-        let outcome = resolve_movement(&map, request_from(start, direction));
+        let outcome =
+            resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
 
         let result = outcome.moved().expect("road should be passable");
         assert_eq!(result.terrain, Some(Terrain::Road));
@@ -280,11 +316,10 @@ mod tests {
 
     #[test]
     fn mud_and_rock_drain_stamina() {
-        let map = Map::generate();
-
         for terrain in [Terrain::Mud, Terrain::Rock] {
-            let (start, direction) = find_target_terrain(&map, terrain);
-            let outcome = resolve_movement(&map, request_from(start, direction));
+            let map = map_with_target_terrain(terrain);
+            let outcome =
+                resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
             let result = outcome.moved().expect("rough terrain should be passable");
 
             assert_eq!(result.terrain, Some(terrain));
@@ -294,8 +329,9 @@ mod tests {
 
     #[test]
     fn cargo_load_increases_negative_stamina_costs() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Mud);
+        let map = map_with_target_terrain(Terrain::Mud);
+        let start = Position { x: 0, y: 0 };
+        let direction = Direction::East;
         let unloaded = resolve_movement(&map, request_from(start, direction))
             .moved()
             .expect("mud should be passable");
@@ -318,8 +354,9 @@ mod tests {
 
     #[test]
     fn sprinting_costs_stamina_and_reduces_cooldown() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Grass);
+        let map = map_with_target_terrain(Terrain::Grass);
+        let start = Position { x: 0, y: 0 };
+        let direction = Direction::East;
 
         let walking = resolve_movement(&map, request_from(start, direction))
             .moved()
@@ -343,8 +380,9 @@ mod tests {
 
     #[test]
     fn steady_movement_costs_more_energy_and_less_stamina_on_rough_ground() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Mud);
+        let map = map_with_target_terrain(Terrain::Mud);
+        let start = Position { x: 0, y: 0 };
+        let direction = Direction::East;
 
         let walking = resolve_movement(&map, request_from(start, direction))
             .moved()
@@ -367,8 +405,9 @@ mod tests {
 
     #[test]
     fn insufficient_stamina_blocks_draining_terrain() {
-        let map = Map::generate();
-        let (start, direction) = find_target_terrain(&map, Terrain::Rock);
+        let map = map_with_target_terrain(Terrain::Rock);
+        let start = Position { x: 0, y: 0 };
+        let direction = Direction::East;
 
         let outcome = resolve_movement(
             &map,
@@ -383,6 +422,85 @@ mod tests {
 
         assert!(matches!(outcome, MovementOutcome::InsufficientStamina(_)));
         assert_eq!(outcome.result().turn_cost, 0);
+        assert_eq!(outcome.result().energy_cost, 0);
+    }
+
+    #[test]
+    fn walkable_uphill_succeeds_and_costs_more_than_flat_ground() {
+        let flat = map_with_target_terrain(Terrain::Grass);
+        let mut uphill = map_with_target_terrain(Terrain::Grass);
+        uphill.set_elevation_for_tests(1, 0, 6);
+        let start = Position { x: 0, y: 0 };
+
+        let flat_result = resolve_movement(&flat, request_from(start, Direction::East))
+            .moved()
+            .expect("flat grass should be passable");
+        let uphill_result = resolve_movement(&uphill, request_from(start, Direction::East))
+            .moved()
+            .expect("small uphill step should be passable");
+
+        assert_eq!(uphill_result.elevation_delta, 2);
+        assert!(uphill_result.stamina_delta < flat_result.stamina_delta);
+        assert!(uphill_result.energy_cost > flat_result.energy_cost);
+    }
+
+    #[test]
+    fn steep_uphill_blocks_without_spending_energy() {
+        let mut map = map_with_target_terrain(Terrain::Grass);
+        map.set_elevation_for_tests(1, 0, 7);
+
+        let outcome =
+            resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
+
+        assert!(matches!(outcome, MovementOutcome::Blocked(_)));
+        assert_eq!(outcome.result().elevation_delta, 3);
+        assert_eq!(outcome.result().energy_cost, 0);
+    }
+
+    #[test]
+    fn walkable_downhill_succeeds() {
+        let mut map = map_with_target_terrain(Terrain::Grass);
+        map.set_elevation_for_tests(0, 0, 7);
+        map.set_elevation_for_tests(1, 0, 4);
+
+        let outcome =
+            resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
+
+        let result = outcome
+            .moved()
+            .expect("moderate downhill should be passable");
+        assert_eq!(result.elevation_delta, -3);
+    }
+
+    #[test]
+    fn steep_downhill_blocks_for_now() {
+        let mut map = map_with_target_terrain(Terrain::Grass);
+        map.set_elevation_for_tests(0, 0, 8);
+        map.set_elevation_for_tests(1, 0, 4);
+
+        let outcome =
+            resolve_movement(&map, request_from(Position { x: 0, y: 0 }, Direction::East));
+
+        assert!(matches!(outcome, MovementOutcome::Blocked(_)));
+        assert_eq!(outcome.result().elevation_delta, -4);
+        assert_eq!(outcome.result().energy_cost, 0);
+    }
+
+    #[test]
+    fn shallow_water_is_walkable_but_deep_water_blocks() {
+        let mut shallow = map_with_target_terrain(Terrain::Water);
+        shallow.set_water_depth_for_tests(1, 0, 1);
+        let mut deep = map_with_target_terrain(Terrain::Water);
+        deep.set_water_depth_for_tests(1, 0, 2);
+        let start = Position { x: 0, y: 0 };
+
+        assert!(
+            resolve_movement(&shallow, request_from(start, Direction::East))
+                .moved()
+                .is_some()
+        );
+        let outcome = resolve_movement(&deep, request_from(start, Direction::East));
+        assert!(matches!(outcome, MovementOutcome::Blocked(_)));
         assert_eq!(outcome.result().energy_cost, 0);
     }
 }

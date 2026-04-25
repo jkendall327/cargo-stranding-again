@@ -67,6 +67,8 @@ pub struct HeadlessSnapshot {
     pub timeline: u64,
     pub delivered_parcels: u32,
     pub player_position: Position,
+    pub player_elevation: i16,
+    pub player_water_depth: u8,
     pub player_stamina: f32,
     pub player_movement_mode: crate::movement::MovementMode,
     pub player_momentum_amount: f32,
@@ -108,6 +110,15 @@ impl HeadlessSnapshot {
                 cargo.current_weight,
             )
         };
+        let (player_elevation, player_water_depth) = {
+            let map = world.resource::<Map>();
+            (
+                map.elevation_at(player_position.x, player_position.y)
+                    .unwrap_or_default(),
+                map.water_depth_at(player_position.x, player_position.y)
+                    .unwrap_or_default(),
+            )
+        };
 
         let mut loose_parcels = 0;
         let mut assigned_parcels = 0;
@@ -127,6 +138,8 @@ impl HeadlessSnapshot {
             timeline,
             delivered_parcels: clock.delivered_parcels,
             player_position,
+            player_elevation,
+            player_water_depth,
             player_stamina,
             player_movement_mode,
             player_momentum_amount,
@@ -191,6 +204,8 @@ pub struct HeadlessExpect {
     pub delivered_parcels: Option<u32>,
     #[serde(alias = "player")]
     pub player_position: Option<ExpectedPosition>,
+    pub player_elevation: Option<i16>,
+    pub player_water_depth: Option<u8>,
     pub player_stamina: Option<f32>,
     pub player_movement_mode: Option<ExpectedMovementMode>,
     pub player_momentum_amount: Option<f32>,
@@ -384,6 +399,18 @@ impl HeadlessExpect {
                 });
             }
         }
+        expect_eq(
+            &mut failures,
+            "player_elevation",
+            self.player_elevation,
+            snapshot.player_elevation,
+        );
+        expect_eq(
+            &mut failures,
+            "player_water_depth",
+            self.player_water_depth,
+            snapshot.player_water_depth,
+        );
         expect_f32(
             &mut failures,
             "player_stamina",
@@ -542,7 +569,7 @@ mod tests {
                 "commands": ["east"],
                 "expect": {
                     "turn": 1,
-                    "timeline": 100,
+                    "timeline": 115,
                     "player_position": { "x": 7, "y": 6 },
                     "player_movement_mode": "walking",
                     "player_momentum_amount": 1.0,

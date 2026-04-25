@@ -226,11 +226,13 @@ fn format_snapshot(snapshot: HeadlessSnapshot) -> String {
     let mut output = String::new();
     let _ = write!(
         output,
-        "turn={} time={} player=({}, {}) stamina={:.1} mode={} momentum={:.1}:{} cargo={:.1} parcels=loose:{},assigned:{},carried:{} delivered={}",
+        "turn={} time={} player=({}, {}) z={} depth={} stamina={:.1} mode={} momentum={:.1}:{} cargo={:.1} parcels=loose:{},assigned:{},carried:{} delivered={}",
         snapshot.turn,
         snapshot.timeline,
         snapshot.player_position.x,
         snapshot.player_position.y,
+        snapshot.player_elevation,
+        snapshot.player_water_depth,
         snapshot.player_stamina,
         snapshot.player_movement_mode.label(),
         snapshot.player_momentum_amount,

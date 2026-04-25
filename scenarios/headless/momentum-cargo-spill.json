@@ -3,15 +3,17 @@
   "commands": ["mode", "east", "east", "south"],
   "expect": {
     "turn": 3,
-    "timeline": 208,
+    "timeline": 240,
     "player_position": {
       "x": 8,
       "y": 7
     },
+    "player_elevation": 3,
+    "player_water_depth": 0,
     "player_movement_mode": "sprinting",
     "player_momentum_amount": 9.0,
     "player_momentum_direction": "south",
-    "player_stamina": 25.1,
+    "player_stamina": 23.9,
     "player_cargo": 0.0,
     "loose_parcels": 3,
     "assigned_parcels": 2,
