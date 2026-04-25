@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 
 use bevy_ecs::prelude::*;
 
@@ -121,7 +121,7 @@ pub struct Map {
     width: i32,
     height: i32,
     pub seed: u64,
-    chunks: HashMap<ChunkCoord, Chunk>,
+    loaded_chunks: HashMap<ChunkCoord, Chunk>,
     depot: TileCoord,
 }
 
@@ -201,6 +201,39 @@ impl Chunk {
         (local.x >= 0 && local.y >= 0 && local.x < CHUNK_WIDTH && local.y < CHUNK_HEIGHT)
             .then_some((local.y * CHUNK_WIDTH + local.x) as usize)
     }
+}
+
+/// Generates one deterministic terrain chunk from a world seed and chunk coordinate.
+///
+/// This is the procedural base hook for future streamed chunks. The current
+/// startup map still uses its finite prebaked region, so roads, depot placement,
+/// and authored lakes remain separate from this generic chunk generator.
+pub fn generate_chunk(seed: u64, coord: ChunkCoord) -> Chunk {
+    let mut chunk = Chunk::new(coord);
+
+    for local_y in 0..CHUNK_HEIGHT {
+        for local_x in 0..CHUNK_WIDTH {
+            let local = LocalTileCoord::new(local_x, local_y);
+            let world_x = coord.x * CHUNK_WIDTH + local_x;
+            let world_y = coord.y * CHUNK_HEIGHT + local_y;
+
+            let terrain_noise = deterministic_seeded_noise(seed, world_x, world_y, 0);
+            let elevation = generated_elevation(seed, world_x, world_y);
+            chunk.set_elevation(local, elevation);
+
+            if terrain_noise < 5 {
+                chunk.set_terrain(local, Terrain::Water);
+                let depth_noise = deterministic_seeded_noise(seed, world_x, world_y, 1);
+                chunk.set_water_depth(local, if depth_noise < 35 { 3 } else { 1 });
+            } else if terrain_noise < 16 {
+                chunk.set_terrain(local, Terrain::Mud);
+            } else if terrain_noise > 91 {
+                chunk.set_terrain(local, Terrain::Rock);
+            }
+        }
+    }
+
+    chunk
 }
 
 impl Map {
@@ -313,8 +346,7 @@ impl Map {
             return None;
         }
         let (chunk_coord, local_coord) = Self::split_tile_coord(coord);
-        self.chunks
-            .get(&chunk_coord)
+        self.loaded_chunk(chunk_coord)
             .and_then(|chunk| chunk.tile_at(local_coord))
     }
 
@@ -343,6 +375,31 @@ impl Map {
         VisibleTiles::new(origin, width, height, self.bounds())
     }
 
+    /// Returns a loaded chunk, or `None` when that chunk is absent.
+    pub fn loaded_chunk(&self, coord: ChunkCoord) -> Option<&Chunk> {
+        self.loaded_chunks.get(&coord)
+    }
+
+    /// Returns a mutable loaded chunk, or `None` when that chunk is absent.
+    pub fn loaded_chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
+        self.loaded_chunks.get_mut(&coord)
+    }
+
+    /// Ensures an in-bounds finite chunk exists in loaded storage.
+    ///
+    /// This is deliberately finite-world scoped for now: chunks outside the
+    /// current prebaked map remain absent instead of being generated on demand.
+    pub fn ensure_chunk_loaded(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
+        if !self.chunk_coord_in_bounds(coord) {
+            return None;
+        }
+
+        match self.loaded_chunks.entry(coord) {
+            Entry::Occupied(entry) => Some(entry.into_mut()),
+            Entry::Vacant(entry) => Some(entry.insert(Chunk::new(coord))),
+        }
+    }
+
     /// Splits a world tile coordinate into chunk and chunk-local coordinates.
     ///
     /// Uses Euclidean division/remainder so negative world coordinates map to
@@ -361,18 +418,18 @@ impl Map {
     }
 
     fn blank(width: i32, height: i32, seed: u64, depot: TileCoord) -> Self {
-        let mut chunks = HashMap::new();
+        let mut loaded_chunks = HashMap::new();
         for chunk_y in 0..chunk_span(height, CHUNK_HEIGHT) {
             for chunk_x in 0..chunk_span(width, CHUNK_WIDTH) {
                 let coord = ChunkCoord::new(chunk_x, chunk_y);
-                chunks.insert(coord, Chunk::new(coord));
+                loaded_chunks.insert(coord, Chunk::new(coord));
             }
         }
         Self {
             width,
             height,
             seed,
-            chunks,
+            loaded_chunks,
             depot,
         }
     }
@@ -403,7 +460,14 @@ impl Map {
             return None;
         }
         let (chunk_coord, _) = Self::split_tile_coord(coord);
-        self.chunks.get_mut(&chunk_coord)
+        self.loaded_chunk_mut(chunk_coord)
+    }
+
+    fn chunk_coord_in_bounds(&self, coord: ChunkCoord) -> bool {
+        coord.x >= 0
+            && coord.y >= 0
+            && coord.x < chunk_span(self.width, CHUNK_WIDTH)
+            && coord.y < chunk_span(self.height, CHUNK_HEIGHT)
     }
 
     fn generate_elevation(&mut self) {
@@ -536,7 +600,7 @@ impl Map {
     }
 
     fn chunk_count(&self) -> usize {
-        self.chunks.len()
+        self.loaded_chunks.len()
     }
 }
 
@@ -546,6 +610,31 @@ fn chunk_span(size: i32, chunk_size: i32) -> i32 {
 
 fn deterministic_noise(x: i32, y: i32) -> i32 {
     let n = (x as u32).wrapping_mul(73_856_093) ^ (y as u32).wrapping_mul(19_349_663) ^ 0x5bd1_e995;
+    (n % 100) as i32
+}
+
+fn generated_elevation(seed: u64, x: i32, y: i32) -> i16 {
+    let mut total = 0;
+    let mut samples = 0;
+    for sample_y in (y - 2)..=(y + 2) {
+        for sample_x in (x - 2)..=(x + 2) {
+            total += deterministic_seeded_noise(seed, sample_x / 3, sample_y / 3, 2);
+            samples += 1;
+        }
+    }
+    ((total / samples) / 11).clamp(0, 9) as i16
+}
+
+fn deterministic_seeded_noise(seed: u64, x: i32, y: i32, salt: u64) -> i32 {
+    let mut n = seed
+        ^ salt.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (x as i64 as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+        ^ (y as i64 as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+    n ^= n >> 30;
+    n = n.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    n ^= n >> 27;
+    n = n.wrapping_mul(0x94D0_49BB_1331_11EB);
+    n ^= n >> 31;
     (n % 100) as i32
 }
 
@@ -561,6 +650,8 @@ mod tests {
         assert_eq!(bounds.width, MAP_WIDTH);
         assert_eq!(bounds.height, MAP_HEIGHT);
         assert_eq!(map.chunk_count(), 12);
+        assert!(map.loaded_chunk(ChunkCoord::new(0, 0)).is_some());
+        assert!(map.loaded_chunk(ChunkCoord::new(3, 2)).is_some());
     }
 
     #[test]
@@ -593,6 +684,30 @@ mod tests {
         ] {
             assert_eq!(first.tile_at_coord(coord), second.tile_at_coord(coord));
         }
+    }
+
+    #[test]
+    fn generated_chunks_are_stable_for_same_seed_and_coord() {
+        let first = generate_chunk(12_345, ChunkCoord::new(2, -1));
+        let second = generate_chunk(12_345, ChunkCoord::new(2, -1));
+
+        assert_eq!(first.coord(), second.coord());
+        for y in 0..CHUNK_HEIGHT {
+            for x in 0..CHUNK_WIDTH {
+                let local = LocalTileCoord::new(x, y);
+                assert_eq!(first.tile_at(local), second.tile_at(local));
+            }
+        }
+    }
+
+    #[test]
+    fn generated_chunks_include_seed_and_chunk_coord_in_terrain() {
+        let base = generate_chunk(12_345, ChunkCoord::new(2, -1));
+        let different_seed = generate_chunk(54_321, ChunkCoord::new(2, -1));
+        let different_coord = generate_chunk(12_345, ChunkCoord::new(3, -1));
+
+        assert!(chunks_differ(&base, &different_seed));
+        assert!(chunks_differ(&base, &different_coord));
     }
 
     #[test]
@@ -642,6 +757,32 @@ mod tests {
     }
 
     #[test]
+    fn loaded_chunks_are_distinct_from_absent_chunks() {
+        let map = Map::generate();
+
+        assert!(map.loaded_chunk(ChunkCoord::new(0, 0)).is_some());
+        assert!(map.loaded_chunk(ChunkCoord::new(3, 2)).is_some());
+        assert!(map.loaded_chunk(ChunkCoord::new(4, 0)).is_none());
+        assert!(map.loaded_chunk(ChunkCoord::new(-1, 0)).is_none());
+    }
+
+    #[test]
+    fn ensuring_chunk_loaded_is_finite_world_scoped() {
+        let mut map = Map::generate();
+        let loaded_before = map.chunk_count();
+
+        let chunk = map
+            .ensure_chunk_loaded(ChunkCoord::new(3, 2))
+            .expect("finite chunk should be loadable");
+        assert_eq!(chunk.coord(), ChunkCoord::new(3, 2));
+        assert_eq!(map.chunk_count(), loaded_before);
+
+        assert!(map.ensure_chunk_loaded(ChunkCoord::new(4, 0)).is_none());
+        assert!(map.ensure_chunk_loaded(ChunkCoord::new(-1, 0)).is_none());
+        assert_eq!(map.chunk_count(), loaded_before);
+    }
+
+    #[test]
     fn water_tiles_have_depth_and_dry_tiles_do_not() {
         let map = Map::generate();
         let bounds = map.bounds();
@@ -658,5 +799,17 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn chunks_differ(a: &Chunk, b: &Chunk) -> bool {
+        for y in 0..CHUNK_HEIGHT {
+            for x in 0..CHUNK_WIDTH {
+                let local = LocalTileCoord::new(x, y);
+                if a.tile_at(local) != b.tile_at(local) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }

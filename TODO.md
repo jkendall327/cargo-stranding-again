@@ -333,37 +333,37 @@ Implementation note:
 
 Goal: move from one fixed rectangle to deterministic, streamable world data.
 
-- [ ] Introduce coordinate types.
-  - [ ] `TileCoord`
-  - [ ] `ChunkCoord`
-  - [ ] Local tile coordinate inside chunk
-- [ ] Introduce `Chunk`.
-  - [ ] fixed width/height
-  - [ ] terrain tile array
-  - [ ] optional elevation/depth arrays later
-- [ ] Introduce `WorldMap` or evolve `Map`.
-  - [ ] active chunk storage
-  - [ ] seed
-  - [ ] chunk lookup by world tile coordinate
-- [ ] Keep initial implementation compatible with the current generated map.
-  - [ ] One chunk or a small fixed set of chunks is fine at first.
-- [ ] Make procedural generation deterministic by seed and chunk coordinate.
+- [x] Introduce coordinate types.
+  - [x] `TileCoord`
+  - [x] `ChunkCoord`
+  - [x] Local tile coordinate inside chunk
+- [x] Introduce `Chunk`.
+  - [x] fixed width/height
+  - [x] terrain tile array
+  - [x] optional elevation/depth arrays later
+- [x] Introduce `WorldMap` or evolve `Map`.
+  - [x] active chunk storage
+  - [x] seed
+  - [x] chunk lookup by world tile coordinate
+- [x] Keep initial implementation compatible with the current generated map.
+  - [x] One chunk or a small fixed set of chunks is fine at first.
+- [x] Make procedural generation deterministic by seed and chunk coordinate.
 - [ ] Add chunk load/unload boundaries around the camera or player.
 - [ ] Add persistence for visited/modified chunks.
   - [ ] Start with a simple save directory or single save file.
   - [ ] Persist only changed chunks if generation is deterministic.
-- [ ] Update rendering to draw visible tiles across chunk boundaries.
-- [ ] Update pathfinding/movement to query world coordinates, not fixed `0..width` / `0..height` assumptions.
+- [x] Update rendering to draw visible tiles across chunk boundaries.
+- [x] Update pathfinding/movement to query world coordinates, not fixed `0..width` / `0..height` assumptions.
 - [ ] Add tests.
-  - [ ] Same seed + chunk coordinate produces same terrain.
-  - [ ] World coordinate lookup crosses chunk boundaries correctly.
+  - [x] Same seed + chunk coordinate produces same terrain.
+  - [x] World coordinate lookup crosses chunk boundaries correctly.
   - [ ] Modified chunk state round-trips through save/load.
 
 Current code pointers:
 
-- `src/map.rs::Map` assumes one fixed `width`, `height`, and `Vec<Terrain>`.
+- `src/map.rs::Map` still exposes finite `width`/`height` bounds, but terrain storage is chunk-backed.
 - `src/resources.rs::Camera` clamps to map width/height.
-- Rendering loops over `camera.x..camera.x + camera.width`, using `map.terrain_at`.
+- Rendering iterates `Map::visible_tiles` and looks up chunk-backed tile data.
 
 ## 9. Verticality
 
