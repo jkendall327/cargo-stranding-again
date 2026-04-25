@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 
 pub use crate::energy::ActionEnergy;
+use crate::map::TileCoord;
 use crate::momentum::MomentumState;
 use crate::movement::MovementMode;
 use crate::resources::Direction;
@@ -9,6 +10,23 @@ use crate::resources::Direction;
 pub struct Position {
     pub x: i32,
     pub y: i32,
+}
+
+impl From<TileCoord> for Position {
+    /// Converts a world tile coordinate into an ECS position component.
+    fn from(coord: TileCoord) -> Self {
+        Self {
+            x: coord.x,
+            y: coord.y,
+        }
+    }
+}
+
+impl From<Position> for TileCoord {
+    /// Converts an ECS position component into a world tile coordinate.
+    fn from(position: Position) -> Self {
+        Self::new(position.x, position.y)
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, Default)]

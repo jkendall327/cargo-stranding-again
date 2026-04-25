@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
 use crate::components::*;
-use crate::map::{Map, Terrain};
+use crate::map::{Map, Terrain, TileCoord};
 use crate::resources::{
     Camera, EnergyTimeline, GameScreen, InventoryMenuState, PauseMenuEntry, PauseMenuState,
     SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
@@ -75,13 +75,13 @@ fn update_camera(world: &mut World) {
         return;
     };
 
-    let (map_width, map_height) = {
+    let bounds = {
         let map = world.resource::<Map>();
-        (map.width, map.height)
+        map.bounds()
     };
     world
         .resource_mut::<Camera>()
-        .center_on(player_position, map_width, map_height);
+        .center_on(player_position, bounds);
 }
 
 fn draw_viewport_background(camera: Camera) {
@@ -106,51 +106,51 @@ fn draw_viewport_frame(camera: Camera) {
 }
 
 fn draw_map(map: &Map, camera: Camera) {
-    for y in camera.y..(camera.y + camera.height).min(map.height) {
-        for x in camera.x..(camera.x + camera.width).min(map.width) {
-            let tile = map.tile_at(x, y).expect("map iteration is in bounds");
-            let (px, py) = tile_to_screen(camera, x, y);
-            draw_rectangle(
-                px,
-                py,
-                TILE_SIZE,
-                TILE_SIZE,
-                terrain_color(tile.terrain, tile.elevation, tile.water_depth),
-            );
-            draw_rectangle_lines(
-                px,
-                py,
-                TILE_SIZE,
-                TILE_SIZE,
-                1.0,
-                Color::from_rgba(0, 0, 0, 45),
-            );
+    for coord in map.visible_tiles(camera.origin_coord(), camera.width, camera.height) {
+        let tile = map
+            .tile_at_coord(coord)
+            .expect("visible tile iteration is in bounds");
+        let (px, py) = tile_to_screen(camera, coord);
+        draw_rectangle(
+            px,
+            py,
+            TILE_SIZE,
+            TILE_SIZE,
+            terrain_color(tile.terrain, tile.elevation, tile.water_depth),
+        );
+        draw_rectangle_lines(
+            px,
+            py,
+            TILE_SIZE,
+            TILE_SIZE,
+            1.0,
+            Color::from_rgba(0, 0, 0, 45),
+        );
 
+        draw_text(
+            &tile.elevation.to_string(),
+            px + 1.5,
+            py + 7.0,
+            8.0,
+            Color::from_rgba(245, 245, 235, 175),
+        );
+
+        if tile.water_depth > 0 {
             draw_text(
-                &tile.elevation.to_string(),
-                px + 1.5,
-                py + 7.0,
+                &tile.water_depth.to_string(),
+                px + 10.0,
+                py + 14.0,
                 8.0,
-                Color::from_rgba(245, 245, 235, 175),
+                Color::from_rgba(210, 235, 255, 210),
             );
-
-            if tile.water_depth > 0 {
-                draw_text(
-                    &tile.water_depth.to_string(),
-                    px + 10.0,
-                    py + 14.0,
-                    8.0,
-                    Color::from_rgba(210, 235, 255, 210),
-                );
-            } else if matches!(terrain_glyph(tile.terrain), "D" | "^") {
-                draw_text(
-                    terrain_glyph(tile.terrain),
-                    px + 4.0,
-                    py + 12.5,
-                    14.0,
-                    Color::from_rgba(18, 18, 18, 200),
-                );
-            }
+        } else if matches!(terrain_glyph(tile.terrain), "D" | "^") {
+            draw_text(
+                terrain_glyph(tile.terrain),
+                px + 4.0,
+                py + 12.5,
+                14.0,
+                Color::from_rgba(18, 18, 18, 200),
+            );
         }
     }
 }
@@ -200,7 +200,7 @@ fn draw_parcels(world: &mut World, camera: Camera) {
         if !camera.contains(*position) {
             continue;
         }
-        let (px, py) = tile_to_screen(camera, position.x, position.y);
+        let (px, py) = tile_to_screen(camera, (*position).into());
         let cx = px + TILE_SIZE / 2.0;
         let cy = py + TILE_SIZE / 2.0;
         let color = if matches!(state, ParcelState::AssignedTo(_)) {
@@ -225,7 +225,7 @@ fn draw_agents(world: &mut World, camera: Camera) {
         if !camera.contains(*position) {
             continue;
         }
-        let (px, py) = tile_to_screen(camera, position.x, position.y);
+        let (px, py) = tile_to_screen(camera, (*position).into());
         let color = if cargo.current_weight > 0.0 {
             Color::from_rgba(238, 196, 99, 255)
         } else {
@@ -259,7 +259,7 @@ fn draw_player(world: &mut World, camera: Camera) {
         return;
     }
 
-    let (px, py) = tile_to_screen(camera, position.x, position.y);
+    let (px, py) = tile_to_screen(camera, (*position).into());
     let player_color = match movement_state.mode {
         crate::movement::MovementMode::Walking => Color::from_rgba(235, 235, 246, 255),
         crate::movement::MovementMode::Sprinting => Color::from_rgba(250, 218, 108, 255),
@@ -354,12 +354,9 @@ fn draw_ui(world: &mut World, camera: Camera) {
     );
     {
         let map = world.resource::<Map>();
-        let elevation = map
-            .elevation_at(player_position.x, player_position.y)
-            .unwrap_or_default();
-        let water_depth = map
-            .water_depth_at(player_position.x, player_position.y)
-            .unwrap_or_default();
+        let player_coord = TileCoord::from(*player_position);
+        let elevation = map.elevation_at_coord(player_coord).unwrap_or_default();
+        let water_depth = map.water_depth_at_coord(player_coord).unwrap_or_default();
         ui_line(
             ui_x,
             &mut y,
@@ -607,10 +604,10 @@ fn ui_lines(ui_x: f32, y: &mut f32, lines: &[&str]) {
     }
 }
 
-fn tile_to_screen(camera: Camera, x: i32, y: i32) -> (f32, f32) {
+fn tile_to_screen(camera: Camera, coord: TileCoord) -> (f32, f32) {
     (
-        VIEWPORT_X + (x - camera.x) as f32 * TILE_SIZE,
-        VIEWPORT_Y + (y - camera.y) as f32 * TILE_SIZE,
+        VIEWPORT_X + (coord.x - camera.x) as f32 * TILE_SIZE,
+        VIEWPORT_Y + (coord.y - camera.y) as f32 * TILE_SIZE,
     )
 }
 

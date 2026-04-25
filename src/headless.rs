@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::components::{
     Agent, Cargo, CargoParcel, Momentum, MovementState, ParcelState, Player, Position, Stamina,
 };
-use crate::map::Map;
+use crate::map::{Map, TileCoord};
 use crate::resources::{
     Camera, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
 };
@@ -112,11 +112,10 @@ impl HeadlessSnapshot {
         };
         let (player_elevation, player_water_depth) = {
             let map = world.resource::<Map>();
+            let player_coord = TileCoord::from(player_position);
             (
-                map.elevation_at(player_position.x, player_position.y)
-                    .unwrap_or_default(),
-                map.water_depth_at(player_position.x, player_position.y)
-                    .unwrap_or_default(),
+                map.elevation_at_coord(player_coord).unwrap_or_default(),
+                map.water_depth_at_coord(player_coord).unwrap_or_default(),
             )
         };
 
@@ -302,13 +301,13 @@ pub fn ascii_viewport(world: &mut World) -> Option<String> {
 
     let map = world.resource::<Map>();
     let mut camera = Camera::square(VIEW_SPAN);
-    camera.center_on(player_position, map.width, map.height);
+    camera.center_on(player_position, map.bounds());
 
     let mut rows = Vec::new();
-    for y in camera.y..(camera.y + camera.height).min(map.height) {
+    for y in camera.y..(camera.y + camera.height).min(map.bounds().height) {
         let mut row = String::new();
-        for x in camera.x..(camera.x + camera.width).min(map.width) {
-            row.push(terrain_glyph(map, x, y));
+        for coord in map.visible_tiles(TileCoord::new(camera.x, y), camera.width, 1) {
+            row.push(terrain_glyph(map, coord));
         }
         rows.push(row);
     }
@@ -320,8 +319,11 @@ pub fn ascii_viewport(world: &mut World) -> Option<String> {
     Some(rows.join("\n"))
 }
 
-fn terrain_glyph(map: &Map, x: i32, y: i32) -> char {
-    match map.terrain_at(x, y).expect("camera iteration is in bounds") {
+fn terrain_glyph(map: &Map, coord: TileCoord) -> char {
+    match map
+        .terrain_at_coord(coord)
+        .expect("camera iteration is in bounds")
+    {
         crate::map::Terrain::Grass => '.',
         crate::map::Terrain::Mud => '~',
         crate::map::Terrain::Rock => '^',

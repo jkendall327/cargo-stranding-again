@@ -4,7 +4,9 @@ use bevy_ecs::prelude::*;
 
 pub const MAP_WIDTH: i32 = 60;
 pub const MAP_HEIGHT: i32 = 40;
+/// Width in world tiles for one map chunk.
 pub const CHUNK_WIDTH: i32 = 16;
+/// Height in world tiles for one map chunk.
 pub const CHUNK_HEIGHT: i32 = 16;
 pub const DEFAULT_MAP_SEED: u64 = 0xCA6E_057A;
 
@@ -46,6 +48,11 @@ impl Terrain {
     }
 }
 
+/// A tile coordinate in global world space.
+///
+/// Gameplay systems should use this coordinate space when asking map questions:
+/// terrain at a position, movement between two tiles, parcel placement, and
+/// world landmarks.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct TileCoord {
     pub x: i32,
@@ -53,11 +60,16 @@ pub struct TileCoord {
 }
 
 impl TileCoord {
+    /// Builds a world tile coordinate.
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 }
 
+/// Identifies one fixed-size chunk in the world.
+///
+/// Chunks are the storage and future streaming unit. The map translates from a
+/// `TileCoord` to a `ChunkCoord` plus `LocalTileCoord` before reading tile data.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ChunkCoord {
     pub x: i32,
@@ -65,11 +77,16 @@ pub struct ChunkCoord {
 }
 
 impl ChunkCoord {
+    /// Builds a chunk coordinate.
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 }
 
+/// A tile coordinate local to a single chunk.
+///
+/// This is not a world position. Its valid range is `0..CHUNK_WIDTH` and
+/// `0..CHUNK_HEIGHT`, and it is only meaningful together with a `ChunkCoord`.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct LocalTileCoord {
     pub x: i32,
@@ -77,11 +94,16 @@ pub struct LocalTileCoord {
 }
 
 impl LocalTileCoord {
+    /// Builds a chunk-local tile coordinate.
     pub const fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 }
 
+/// Fixed-size terrain storage for one chunk.
+///
+/// Chunks currently store complete terrain/elevation/water arrays in memory.
+/// Later, this is the natural unit to load, unload, generate, and persist.
 #[derive(Clone, Debug)]
 pub struct Chunk {
     coord: ChunkCoord,
@@ -90,15 +112,30 @@ pub struct Chunk {
     water_depths: Vec<u8>,
 }
 
+/// Chunk-backed map resource.
+///
+/// Callers address this as one continuous world using `TileCoord`. Internally,
+/// the map resolves each world tile to a chunk and local tile coordinate.
 #[derive(Resource, Clone, Debug)]
 pub struct Map {
-    pub width: i32,
-    pub height: i32,
+    width: i32,
+    height: i32,
     pub seed: u64,
     chunks: HashMap<ChunkCoord, Chunk>,
-    pub depot: TileCoord,
+    depot: TileCoord,
 }
 
+/// Finite world bounds in world tiles.
+///
+/// The current game still uses a finite prebaked world, so these bounds drive
+/// camera clamping and out-of-bounds tile lookup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MapBounds {
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Complete terrain data for one world tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TileInfo {
     pub terrain: Terrain,
@@ -106,6 +143,7 @@ pub struct TileInfo {
     pub water_depth: u8,
 }
 
+/// Terrain data for movement from one world tile to an adjacent world tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MovementEdge {
     pub origin: TileInfo,
@@ -114,6 +152,7 @@ pub struct MovementEdge {
 }
 
 impl Chunk {
+    /// Creates an empty grass-filled chunk at `coord`.
     pub fn new(coord: ChunkCoord) -> Self {
         let len = (CHUNK_WIDTH * CHUNK_HEIGHT) as usize;
         Self {
@@ -124,6 +163,7 @@ impl Chunk {
         }
     }
 
+    /// Returns this chunk's world chunk coordinate.
     pub fn coord(&self) -> ChunkCoord {
         self.coord
     }
@@ -164,6 +204,10 @@ impl Chunk {
 }
 
 impl Map {
+    /// Generates the current finite world into chunk-backed storage.
+    ///
+    /// This preserves the old `60x40` generated map behavior while giving the
+    /// storage layer the same shape that future streamed/procedural worlds need.
     pub fn generate() -> Self {
         let width = MAP_WIDTH;
         let height = MAP_HEIGHT;
@@ -227,38 +271,43 @@ impl Map {
         map
     }
 
+    /// Returns the finite map dimensions in world tiles.
+    pub fn bounds(&self) -> MapBounds {
+        MapBounds {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    /// Returns the depot's world tile coordinate.
+    pub fn depot_coord(&self) -> TileCoord {
+        self.depot
+    }
+
+    /// Returns true when `coord` is inside the finite prebaked world.
     pub fn in_bounds_coord(&self, coord: TileCoord) -> bool {
         coord.x >= 0 && coord.y >= 0 && coord.x < self.width && coord.y < self.height
     }
 
-    pub fn in_bounds(&self, x: i32, y: i32) -> bool {
-        self.in_bounds_coord(TileCoord::new(x, y))
-    }
-
+    /// Returns terrain at a world tile, or `None` outside the finite world.
     pub fn terrain_at_coord(&self, coord: TileCoord) -> Option<Terrain> {
         self.tile_at_coord(coord).map(|tile| tile.terrain)
     }
 
-    pub fn terrain_at(&self, x: i32, y: i32) -> Option<Terrain> {
-        self.terrain_at_coord(TileCoord::new(x, y))
-    }
-
+    /// Returns elevation at a world tile, or `None` outside the finite world.
     pub fn elevation_at_coord(&self, coord: TileCoord) -> Option<i16> {
         self.tile_at_coord(coord).map(|tile| tile.elevation)
     }
 
-    pub fn elevation_at(&self, x: i32, y: i32) -> Option<i16> {
-        self.elevation_at_coord(TileCoord::new(x, y))
-    }
-
+    /// Returns water depth at a world tile, or `None` outside the finite world.
     pub fn water_depth_at_coord(&self, coord: TileCoord) -> Option<u8> {
         self.tile_at_coord(coord).map(|tile| tile.water_depth)
     }
 
-    pub fn water_depth_at(&self, x: i32, y: i32) -> Option<u8> {
-        self.water_depth_at_coord(TileCoord::new(x, y))
-    }
-
+    /// Returns all tile data at a world tile.
+    ///
+    /// This is the primary typed lookup. It splits the world coordinate into a
+    /// chunk coordinate and chunk-local coordinate before reading storage.
     pub fn tile_at_coord(&self, coord: TileCoord) -> Option<TileInfo> {
         if !self.in_bounds_coord(coord) {
             return None;
@@ -269,10 +318,7 @@ impl Map {
             .and_then(|chunk| chunk.tile_at(local_coord))
     }
 
-    pub fn tile_at(&self, x: i32, y: i32) -> Option<TileInfo> {
-        self.tile_at_coord(TileCoord::new(x, y))
-    }
-
+    /// Returns terrain information needed to resolve movement between two tiles.
     pub fn movement_edge(&self, origin: TileCoord, target: TileCoord) -> Option<MovementEdge> {
         let origin = self.tile_at_coord(origin)?;
         let target = self.tile_at_coord(target)?;
@@ -283,10 +329,24 @@ impl Map {
         })
     }
 
-    pub fn is_passable(&self, x: i32, y: i32) -> bool {
-        self.terrain_at(x, y).is_some_and(Terrain::passable)
+    /// Returns true when a world tile contains passable terrain.
+    pub fn is_passable_coord(&self, coord: TileCoord) -> bool {
+        self.terrain_at_coord(coord).is_some_and(Terrain::passable)
     }
 
+    /// Iterates finite in-bounds world tiles visible from a rectangular viewport.
+    ///
+    /// The iterator clamps to the current finite map bounds. It still yields
+    /// world tile coordinates, so rendering and headless views can cross chunk
+    /// boundaries without knowing where those boundaries are.
+    pub fn visible_tiles(&self, origin: TileCoord, width: i32, height: i32) -> VisibleTiles {
+        VisibleTiles::new(origin, width, height, self.bounds())
+    }
+
+    /// Splits a world tile coordinate into chunk and chunk-local coordinates.
+    ///
+    /// Uses Euclidean division/remainder so negative world coordinates map to
+    /// stable chunks correctly when infinite or streamed worlds arrive.
     pub fn split_tile_coord(coord: TileCoord) -> (ChunkCoord, LocalTileCoord) {
         (
             ChunkCoord::new(
@@ -400,6 +460,50 @@ impl Map {
     }
 }
 
+/// Iterator over visible finite world tiles.
+///
+/// It yields `TileCoord`s in row-major order, clamped to the current finite map
+/// bounds. Callers then ask `Map` for terrain data at each yielded coordinate.
+pub struct VisibleTiles {
+    start_x: i32,
+    end_x: i32,
+    end_y: i32,
+    next: TileCoord,
+}
+
+impl VisibleTiles {
+    fn new(origin: TileCoord, width: i32, height: i32, bounds: MapBounds) -> Self {
+        let start_x = origin.x.clamp(0, bounds.width);
+        let start_y = origin.y.clamp(0, bounds.height);
+        let end_x = (origin.x + width).clamp(0, bounds.width);
+        let end_y = (origin.y + height).clamp(0, bounds.height);
+        Self {
+            start_x,
+            end_x,
+            end_y,
+            next: TileCoord::new(start_x, start_y),
+        }
+    }
+}
+
+impl Iterator for VisibleTiles {
+    type Item = TileCoord;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next.y >= self.end_y || self.next.x >= self.end_x {
+            return None;
+        }
+
+        let coord = self.next;
+        self.next.x += 1;
+        if self.next.x >= self.end_x {
+            self.next.x = self.start_x;
+            self.next.y += 1;
+        }
+        Some(coord)
+    }
+}
+
 #[cfg(test)]
 impl Map {
     pub(crate) fn flat_for_tests(
@@ -452,9 +556,10 @@ mod tests {
     #[test]
     fn generated_map_allocates_chunks_for_finite_bounds() {
         let map = Map::generate();
+        let bounds = map.bounds();
 
-        assert_eq!(map.width, MAP_WIDTH);
-        assert_eq!(map.height, MAP_HEIGHT);
+        assert_eq!(bounds.width, MAP_WIDTH);
+        assert_eq!(bounds.height, MAP_HEIGHT);
         assert_eq!(map.chunk_count(), 12);
     }
 
@@ -509,6 +614,24 @@ mod tests {
     }
 
     #[test]
+    fn visible_tile_iteration_clamps_to_bounds() {
+        let map = Map::flat_for_tests(32, 32, Terrain::Grass, 4);
+        let tiles = map
+            .visible_tiles(TileCoord::new(30, 30), 5, 5)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            tiles,
+            vec![
+                TileCoord::new(30, 30),
+                TileCoord::new(31, 30),
+                TileCoord::new(30, 31),
+                TileCoord::new(31, 31),
+            ]
+        );
+    }
+
+    #[test]
     fn finite_world_lookups_outside_bounds_are_absent() {
         let map = Map::generate();
 
@@ -521,9 +644,10 @@ mod tests {
     #[test]
     fn water_tiles_have_depth_and_dry_tiles_do_not() {
         let map = Map::generate();
+        let bounds = map.bounds();
 
-        for y in 0..map.height {
-            for x in 0..map.width {
+        for y in 0..bounds.height {
+            for x in 0..bounds.width {
                 let tile = map
                     .tile_at_coord(TileCoord::new(x, y))
                     .expect("generated coordinate is in bounds");

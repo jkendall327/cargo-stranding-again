@@ -147,7 +147,7 @@ pub fn player_actions(mut params: PlayerActionParams) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::Terrain;
+    use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
 
     fn insert_player_action_resources(world: &mut World, action: PlayerAction) {
@@ -194,10 +194,13 @@ mod tests {
     }
 
     fn find_adjacent_terrain_pair(map: &Map, terrain: Terrain) -> (Position, Position) {
-        for y in 0..map.height {
-            for x in 0..(map.width - 1) {
-                if map.terrain_at(x, y) == Some(terrain)
-                    && map.terrain_at(x + 1, y) == Some(terrain)
+        let bounds = map.bounds();
+        for y in 0..bounds.height {
+            for x in 0..(bounds.width - 1) {
+                let coord = TileCoord::new(x, y);
+                let east = TileCoord::new(x + 1, y);
+                if map.terrain_at_coord(coord) == Some(terrain)
+                    && map.terrain_at_coord(east) == Some(terrain)
                 {
                     return (Position { x, y }, Position { x: x + 1, y });
                 }
@@ -284,8 +287,8 @@ mod tests {
         let map = Map::generate();
         let target = Position { x: 6, y: 31 };
         let start = Position { x: 5, y: 31 };
-        assert_eq!(map.terrain_at(start.x, start.y), Some(Terrain::Road));
-        assert_eq!(map.terrain_at(target.x, target.y), Some(Terrain::Road));
+        assert_eq!(map.terrain_at_coord(start.into()), Some(Terrain::Road));
+        assert_eq!(map.terrain_at_coord(target.into()), Some(Terrain::Road));
         world.insert_resource(map);
 
         run_player_move(&mut world, start, target, 10.0);
@@ -385,7 +388,7 @@ mod tests {
         let mut world = World::new();
         let map = Map::generate();
         let start = Position { x: 6, y: 6 };
-        assert!(map.is_passable(start.x, start.y + 1));
+        assert!(map.is_passable_coord(TileCoord::new(start.x, start.y + 1)));
         world.insert_resource(map);
         insert_player_action_resources(&mut world, PlayerAction::Move(Direction::South));
         let player = spawn_test_player(&mut world, start, 35.0);

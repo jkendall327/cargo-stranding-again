@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, ITEM_ACTION_ENERGY_COST};
-use crate::map::Map;
+use crate::map::{Map, TileCoord};
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
 use crate::resources::{Direction, EnergyTimeline, SimulationClock};
 
@@ -104,7 +104,8 @@ pub fn agent_jobs(
                     }
                 }
                 JobPhase::GoToDepot => {
-                    if position.x == map.depot.x && position.y == map.depot.y {
+                    let depot = map.depot_coord();
+                    if TileCoord::from(*position) == depot {
                         *parcel_state = ParcelState::Delivered;
                         cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
                         clock.delivered_parcels += 1;
@@ -125,10 +126,7 @@ pub fn agent_jobs(
                         &mut position,
                         cargo.current_weight,
                         cargo.max_weight,
-                        Position {
-                            x: map.depot.x,
-                            y: map.depot.y,
-                        },
+                        Position::from(depot),
                     ) {
                         velocity.dx = moved.actual_delta.0;
                         velocity.dy = moved.actual_delta.1;
@@ -249,7 +247,7 @@ mod tests {
     fn agent_picks_up_and_delivers_parcel_to_depot() {
         let mut world = World::new();
         let map = Map::generate();
-        let depot = map.depot;
+        let depot = map.depot_coord();
         world.insert_resource(map);
         world.insert_resource(SimulationClock {
             turn: 0,

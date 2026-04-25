@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 
 use crate::components::Position;
+use crate::map::{MapBounds, TileCoord};
 
 pub const DEFAULT_CAMERA_TILE_SPAN: i32 = 31;
 pub const INPUT_REPEAT_INITIAL_DELAY: f64 = 0.18;
@@ -286,9 +287,16 @@ impl Camera {
         }
     }
 
-    pub fn center_on(&mut self, position: Position, map_width: i32, map_height: i32) {
-        self.x = clamp_axis(position.x - self.width / 2, self.width, map_width);
-        self.y = clamp_axis(position.y - self.height / 2, self.height, map_height);
+    /// Centers the camera on an ECS position while clamping to finite map bounds.
+    pub fn center_on(&mut self, position: Position, bounds: MapBounds) {
+        let coord = TileCoord::from(position);
+        self.x = clamp_axis(coord.x - self.width / 2, self.width, bounds.width);
+        self.y = clamp_axis(coord.y - self.height / 2, self.height, bounds.height);
+    }
+
+    /// Returns the camera's top-left tile as a world tile coordinate.
+    pub fn origin_coord(self) -> TileCoord {
+        TileCoord::new(self.x, self.y)
     }
 
     pub fn contains(self, position: Position) -> bool {
@@ -321,13 +329,31 @@ mod tests {
     fn camera_centers_on_player_until_it_hits_map_edges() {
         let mut camera = Camera::square(31);
 
-        camera.center_on(Position { x: 30, y: 20 }, 60, 40);
+        camera.center_on(
+            Position { x: 30, y: 20 },
+            MapBounds {
+                width: 60,
+                height: 40,
+            },
+        );
         assert_eq!((camera.x, camera.y), (15, 5));
 
-        camera.center_on(Position { x: 2, y: 2 }, 60, 40);
+        camera.center_on(
+            Position { x: 2, y: 2 },
+            MapBounds {
+                width: 60,
+                height: 40,
+            },
+        );
         assert_eq!((camera.x, camera.y), (0, 0));
 
-        camera.center_on(Position { x: 58, y: 38 }, 60, 40);
+        camera.center_on(
+            Position { x: 58, y: 38 },
+            MapBounds {
+                width: 60,
+                height: 40,
+            },
+        );
         assert_eq!((camera.x, camera.y), (29, 9));
     }
 
