@@ -191,9 +191,10 @@ fn draw_agents(world: &mut World, camera: Camera) {
 }
 
 fn draw_player(world: &mut World, camera: Camera) {
-    let mut query =
-        world.query_filtered::<(&Position, &Stamina, &Cargo, &MovementState), With<Player>>();
-    let Some((position, stamina, cargo, movement_state)) = query.iter(world).next() else {
+    let mut query = world
+        .query_filtered::<(&Position, &Stamina, &Cargo, &MovementState, &Momentum), With<Player>>();
+    let Some((position, stamina, cargo, movement_state, _momentum)) = query.iter(world).next()
+    else {
         return;
     };
     if !camera.contains(*position) {
@@ -259,9 +260,15 @@ fn draw_ui(world: &mut World, camera: Camera) {
 
     let clock = *world.resource::<SimulationClock>();
     let timeline = *world.resource::<EnergyTimeline>();
-    let mut player_query = world
-        .query_filtered::<(&Position, &Stamina, &Cargo, &MovementState, &ActionEnergy), With<Player>>();
-    let (player_position, stamina, cargo, movement_state, player_energy) = player_query
+    let mut player_query = world.query_filtered::<(
+        &Position,
+        &Stamina,
+        &Cargo,
+        &MovementState,
+        &Momentum,
+        &ActionEnergy,
+    ), With<Player>>();
+    let (player_position, stamina, cargo, movement_state, momentum, player_energy) = player_query
         .iter(world)
         .next()
         .expect("player exists for UI");
@@ -296,6 +303,18 @@ fn draw_ui(world: &mut World, camera: Camera) {
         ui_x,
         &mut y,
         &format!("Movement: {}", movement_state.mode.label()),
+    );
+    ui_line(
+        ui_x,
+        &mut y,
+        &format!(
+            "Momentum: {:.1} {}",
+            momentum.amount,
+            momentum
+                .direction
+                .map(|direction| direction.label())
+                .unwrap_or("none")
+        ),
     );
     ui_line(
         ui_x,

@@ -184,13 +184,13 @@ Implementation tasks:
 
 Momentum tasks for after the energy timeline:
 
-- [ ] Add a grid-friendly `Momentum` component.
-  - [ ] Store direction plus amount, e.g. `Momentum { direction: Option<Direction>, amount: f32 }`.
-  - [ ] Continuing straight increases or preserves momentum.
-  - [ ] Slowing/stopping decays momentum.
-  - [ ] Turning at high momentum increases stumble/fall risk later.
-- [ ] Keep momentum risk-only at first.
-  - [ ] Momentum should not force automatic carry-through movement in the first version.
+- [x] Add a grid-friendly `Momentum` component.
+  - [x] Store direction plus amount, e.g. `Momentum { direction: Option<Direction>, amount: f32 }`.
+  - [x] Continuing straight increases or preserves momentum.
+  - [x] Slowing/stopping decays momentum.
+  - [x] Turning at high momentum increases stumble/fall risk later.
+- [x] Keep momentum risk-only at first.
+  - [x] Momentum should not force automatic carry-through movement in the first version.
   - [ ] Later, high momentum may force carry-through if that becomes worth the complexity.
 
 ## 4. Serious Cargo Model

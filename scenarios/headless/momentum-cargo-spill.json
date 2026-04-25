@@ -1,0 +1,21 @@
+{
+  "name": "momentum cargo spill",
+  "commands": ["mode", "east", "east", "south"],
+  "expect": {
+    "turn": 3,
+    "timeline": 208,
+    "player_position": {
+      "x": 8,
+      "y": 7
+    },
+    "player_movement_mode": "sprinting",
+    "player_momentum_amount": 9.0,
+    "player_momentum_direction": "south",
+    "player_stamina": 25.1,
+    "player_cargo": 0.0,
+    "loose_parcels": 3,
+    "assigned_parcels": 2,
+    "carried_parcels": 0,
+    "delivered_parcels": 0
+  }
+}

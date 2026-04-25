@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 use crate::app::init_world;
 use crate::components::{
-    Agent, Cargo, CargoParcel, MovementState, ParcelState, Player, Position, Stamina,
+    Agent, Cargo, CargoParcel, Momentum, MovementState, ParcelState, Player, Position, Stamina,
 };
 use crate::map::Map;
 use crate::resources::{
@@ -73,6 +73,8 @@ pub struct HeadlessSnapshot {
     pub player_position: Position,
     pub player_stamina: f32,
     pub player_movement_mode: crate::movement::MovementMode,
+    pub player_momentum_amount: f32,
+    pub player_momentum_direction: Option<Direction>,
     pub player_cargo: f32,
     pub loose_parcels: usize,
     pub assigned_parcels: usize,
@@ -84,14 +86,29 @@ impl HeadlessSnapshot {
         let clock = *world.resource::<SimulationClock>();
         let timeline = world.resource::<EnergyTimeline>().now;
 
-        let (player_position, player_stamina, player_movement_mode, player_cargo) = {
-            let mut player_query = world
-                .query_filtered::<(&Position, &Stamina, &MovementState, &Cargo), With<Player>>();
-            let (position, stamina, movement_state, cargo) = player_query.iter(world).next()?;
+        let (
+            player_position,
+            player_stamina,
+            player_movement_mode,
+            player_momentum_amount,
+            player_momentum_direction,
+            player_cargo,
+        ) = {
+            let mut player_query = world.query_filtered::<(
+                &Position,
+                &Stamina,
+                &MovementState,
+                &Momentum,
+                &Cargo,
+            ), With<Player>>();
+            let (position, stamina, movement_state, momentum, cargo) =
+                player_query.iter(world).next()?;
             (
                 *position,
                 stamina.current,
                 movement_state.mode,
+                momentum.amount,
+                momentum.direction,
                 cargo.current_weight,
             )
         };
@@ -116,6 +133,8 @@ impl HeadlessSnapshot {
             player_position,
             player_stamina,
             player_movement_mode,
+            player_momentum_amount,
+            player_momentum_direction,
             player_cargo,
             loose_parcels,
             assigned_parcels,
@@ -178,6 +197,8 @@ pub struct HeadlessExpect {
     pub player_position: Option<ExpectedPosition>,
     pub player_stamina: Option<f32>,
     pub player_movement_mode: Option<ExpectedMovementMode>,
+    pub player_momentum_amount: Option<f32>,
+    pub player_momentum_direction: Option<ExpectedDirection>,
     pub player_cargo: Option<f32>,
     pub loose_parcels: Option<usize>,
     pub assigned_parcels: Option<usize>,
@@ -196,6 +217,15 @@ pub enum ExpectedMovementMode {
     Walking,
     Sprinting,
     Steady,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExpectedDirection {
+    West,
+    East,
+    North,
+    South,
 }
 
 pub struct HeadlessScenarioReport {
@@ -376,6 +406,25 @@ impl HeadlessExpect {
         }
         expect_f32(
             &mut failures,
+            "player_momentum_amount",
+            self.player_momentum_amount,
+            snapshot.player_momentum_amount,
+        );
+        if let Some(expected) = self.player_momentum_direction {
+            let actual = snapshot
+                .player_momentum_direction
+                .map(Direction::label)
+                .unwrap_or("none");
+            if actual != expected.label() {
+                failures.push(ExpectationFailure {
+                    field: "player_momentum_direction",
+                    expected: expected.label().to_owned(),
+                    actual: actual.to_owned(),
+                });
+            }
+        }
+        expect_f32(
+            &mut failures,
             "player_cargo",
             self.player_cargo,
             snapshot.player_cargo,
@@ -400,6 +449,17 @@ impl HeadlessExpect {
         );
 
         failures
+    }
+}
+
+impl ExpectedDirection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::West => "west",
+            Self::East => "east",
+            Self::North => "north",
+            Self::South => "south",
+        }
     }
 }
 
@@ -488,7 +548,9 @@ mod tests {
                     "turn": 1,
                     "timeline": 100,
                     "player_position": { "x": 7, "y": 6 },
-                    "player_movement_mode": "walking"
+                    "player_movement_mode": "walking",
+                    "player_momentum_amount": 1.0,
+                    "player_momentum_direction": "east"
                 }
             }"#,
         )

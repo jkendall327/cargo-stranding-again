@@ -7,8 +7,8 @@ use crate::input::KeyBindings;
 use crate::map::Map;
 use crate::render;
 use crate::resources::{
-    Camera, EnergyTimeline, GameScreen, InputRepeat, InventoryMenuState, MenuInputState,
-    PauseMenuState, PlayerIntent, SimulationClock,
+    Camera, CargoLossRisk, EnergyTimeline, GameScreen, InputRepeat, InventoryMenuState,
+    MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
 };
 use crate::systems;
 
@@ -84,6 +84,7 @@ pub(crate) fn init_world(world: &mut World) {
     world.insert_resource(PauseMenuState::default());
     world.insert_resource(InventoryMenuState::default());
     world.insert_resource(EnergyTimeline::default());
+    world.insert_resource(CargoLossRisk::default());
     world.insert_resource(Camera::default());
     world.insert_resource(SimulationClock {
         turn: 0,
@@ -103,6 +104,7 @@ pub(crate) fn init_world(world: &mut World) {
             max: 35.0,
         },
         MovementState::default(),
+        Momentum::default(),
         ActionEnergy::default(),
     ));
 

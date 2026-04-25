@@ -38,6 +38,15 @@ impl Direction {
             Self::South => (0, 1),
         }
     }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::West => "west",
+            Self::East => "east",
+            Self::North => "north",
+            Self::South => "south",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -225,6 +234,27 @@ pub struct SimulationClock {
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct EnergyTimeline {
     pub now: u64,
+}
+
+pub const CARGO_LOSS_RISK_THRESHOLD: u32 = 100;
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct CargoLossRisk {
+    pub amount: u32,
+}
+
+impl CargoLossRisk {
+    pub fn reset(&mut self) {
+        self.amount = 0;
+    }
+
+    pub fn add(&mut self, amount: u32) {
+        self.amount = self.amount.saturating_add(amount);
+    }
+
+    pub fn crosses_threshold(self) -> bool {
+        self.amount >= CARGO_LOSS_RISK_THRESHOLD
+    }
 }
 
 #[derive(Resource, Clone, Copy, Debug)]

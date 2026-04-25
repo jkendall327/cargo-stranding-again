@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::*;
 
 pub use crate::energy::ActionEnergy;
+use crate::momentum::MomentumState;
 use crate::movement::MovementMode;
+use crate::resources::Direction;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
@@ -44,6 +46,30 @@ impl Default for MovementState {
     fn default() -> Self {
         Self {
             mode: MovementMode::Walking,
+        }
+    }
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Momentum {
+    pub direction: Option<Direction>,
+    pub amount: f32,
+}
+
+impl From<Momentum> for MomentumState {
+    fn from(momentum: Momentum) -> Self {
+        Self {
+            direction: momentum.direction,
+            amount: momentum.amount,
+        }
+    }
+}
+
+impl From<MomentumState> for Momentum {
+    fn from(momentum: MomentumState) -> Self {
+        Self {
+            direction: momentum.direction,
+            amount: momentum.amount,
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::energy::ActionEnergy;
 use crate::map::Map;
 use crate::resources::{EnergyTimeline, PlayerIntent, SimulationClock};
 use crate::systems::agents::{agent_jobs, assign_agent_jobs};
-use crate::systems::player::player_actions;
+use crate::systems::player::{player_actions, reset_cargo_loss_risk, resolve_cargo_loss_risk};
 
 pub fn advance_timeline_for_player_intent(world: &mut World) {
     if world.resource::<PlayerIntent>().action.is_none() {
@@ -46,7 +46,14 @@ fn process_player_action(world: &mut World) -> bool {
     }
 
     let mut schedule = Schedule::default();
-    schedule.add_systems(player_actions);
+    schedule.add_systems(
+        (
+            reset_cargo_loss_risk,
+            player_actions,
+            resolve_cargo_loss_risk,
+        )
+            .chain(),
+    );
     schedule.run(world);
 
     let mut query = world.query_filtered::<&ActionEnergy, With<Player>>();

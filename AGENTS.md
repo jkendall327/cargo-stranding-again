@@ -3,6 +3,9 @@
 This is a small Rust game using Macroquad for the window/input/render loop and
 standalone Bevy ECS for deterministic simulation state.
 
+Look at the TODO.md file. It contains a big task list for stuff we're going to be doing.
+If I mentioned numbers like '#3' I'm referring to stuff here.
+
 ## Useful Commands
 
 - `cargo fmt --check`
