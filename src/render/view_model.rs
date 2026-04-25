@@ -1,12 +1,15 @@
 use bevy_ecs::prelude::*;
 
+use crate::cargo::player_carried_parcels;
 use crate::components::{
     Agent, AssignedJob, Cargo, JobPhase, Momentum, MovementState, Player, Position, Stamina,
 };
 use crate::energy::ActionEnergy;
 use crate::map::{Map, TileCoord};
 use crate::movement::MovementMode;
-use crate::resources::{Camera, DeliveryStats, Direction, EnergyTimeline, SimulationClock};
+use crate::resources::{
+    Camera, DeliveryStats, Direction, EnergyTimeline, InventoryMenuState, SimulationClock,
+};
 
 pub struct PlayerHudSnapshot {
     pub turn: u64,
@@ -101,6 +104,25 @@ pub struct PorterDebugRow {
     pub phase_label: &'static str,
     pub load: f32,
     pub ready_label: String,
+}
+
+pub struct InventoryEntry {
+    pub label: String,
+    pub selected: bool,
+}
+
+impl InventoryEntry {
+    pub fn all_from_world(world: &mut World) -> Vec<Self> {
+        let selected_index = world.resource::<InventoryMenuState>().selected_index();
+        player_carried_parcels(world)
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| Self {
+                label: format!("Parcel {:.0} weight", entry.weight),
+                selected: selected_index == index,
+            })
+            .collect()
+    }
 }
 
 impl PorterDebugRow {
