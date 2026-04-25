@@ -1,7 +1,6 @@
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
-use crate::app::init_world;
 use crate::components::{
     Agent, Cargo, CargoParcel, Momentum, MovementState, ParcelState, Player, Position, Stamina,
 };
@@ -9,7 +8,8 @@ use crate::map::Map;
 use crate::resources::{
     Camera, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent, SimulationClock,
 };
-use crate::systems;
+use crate::schedules;
+use crate::world_setup::init_world;
 
 pub struct HeadlessGame {
     world: World,
@@ -21,8 +21,7 @@ impl HeadlessGame {
         let mut world = World::new();
         init_world(&mut world);
 
-        let mut player_schedule = Schedule::default();
-        player_schedule.add_systems(systems::advance_timeline_for_player_intent);
+        let player_schedule = schedules::player_intent_schedule();
 
         tracing::debug!("created headless game");
 

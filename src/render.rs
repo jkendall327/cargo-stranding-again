@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
 use crate::components::*;
-use crate::map::Map;
+use crate::map::{Map, Terrain};
 use crate::resources::{
     Camera, EnergyTimeline, GameScreen, InventoryMenuState, PauseMenuEntry, PauseMenuState,
     SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
@@ -110,7 +110,7 @@ fn draw_map(map: &Map, camera: Camera) {
         for x in camera.x..(camera.x + camera.width).min(map.width) {
             let terrain = map.terrain_at(x, y).expect("map iteration is in bounds");
             let (px, py) = tile_to_screen(camera, x, y);
-            draw_rectangle(px, py, TILE_SIZE, TILE_SIZE, terrain.color());
+            draw_rectangle(px, py, TILE_SIZE, TILE_SIZE, terrain_color(terrain));
             draw_rectangle_lines(
                 px,
                 py,
@@ -120,9 +120,9 @@ fn draw_map(map: &Map, camera: Camera) {
                 Color::from_rgba(0, 0, 0, 45),
             );
 
-            if matches!(terrain.glyph(), "D" | "w" | "^") {
+            if matches!(terrain_glyph(terrain), "D" | "w" | "^") {
                 draw_text(
-                    terrain.glyph(),
+                    terrain_glyph(terrain),
                     px + 4.0,
                     py + 12.5,
                     14.0,
@@ -130,6 +130,28 @@ fn draw_map(map: &Map, camera: Camera) {
                 );
             }
         }
+    }
+}
+
+fn terrain_color(terrain: Terrain) -> Color {
+    match terrain {
+        Terrain::Grass => Color::from_rgba(64, 128, 72, 255),
+        Terrain::Mud => Color::from_rgba(104, 75, 48, 255),
+        Terrain::Rock => Color::from_rgba(92, 96, 100, 255),
+        Terrain::Water => Color::from_rgba(34, 92, 138, 255),
+        Terrain::Road => Color::from_rgba(150, 126, 78, 255),
+        Terrain::Depot => Color::from_rgba(214, 174, 68, 255),
+    }
+}
+
+fn terrain_glyph(terrain: Terrain) -> &'static str {
+    match terrain {
+        Terrain::Grass => ".",
+        Terrain::Mud => "~",
+        Terrain::Rock => "^",
+        Terrain::Water => "w",
+        Terrain::Road => "=",
+        Terrain::Depot => "D",
     }
 }
 

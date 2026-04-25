@@ -1,5 +1,4 @@
 use bevy_ecs::prelude::*;
-use macroquad::prelude::*;
 
 pub const MAP_WIDTH: i32 = 60;
 pub const MAP_HEIGHT: i32 = 40;
@@ -34,28 +33,6 @@ impl Terrain {
             Terrain::Water => 0.0,
             Terrain::Road => 0.75,
             Terrain::Depot => 1.5,
-        }
-    }
-
-    pub fn color(self) -> Color {
-        match self {
-            Terrain::Grass => Color::from_rgba(64, 128, 72, 255),
-            Terrain::Mud => Color::from_rgba(104, 75, 48, 255),
-            Terrain::Rock => Color::from_rgba(92, 96, 100, 255),
-            Terrain::Water => Color::from_rgba(34, 92, 138, 255),
-            Terrain::Road => Color::from_rgba(150, 126, 78, 255),
-            Terrain::Depot => Color::from_rgba(214, 174, 68, 255),
-        }
-    }
-
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Terrain::Grass => ".",
-            Terrain::Mud => "~",
-            Terrain::Rock => "^",
-            Terrain::Water => "w",
-            Terrain::Road => "=",
-            Terrain::Depot => "D",
         }
     }
 

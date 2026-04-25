@@ -1,16 +1,10 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
-use crate::components::*;
-use crate::energy::ActionEnergy;
-use crate::input::KeyBindings;
-use crate::map::Map;
 use crate::render;
-use crate::resources::{
-    Camera, CargoLossRisk, EnergyTimeline, GameScreen, InputRepeat, InventoryMenuState,
-    MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
-};
-use crate::systems;
+use crate::resources::{GameScreen, PlayerIntent};
+use crate::schedules;
+use crate::world_setup::init_world;
 
 pub struct Game {
     world: World,
@@ -29,11 +23,8 @@ impl Game {
         let mut world = World::new();
         init_world(&mut world);
 
-        let mut player_schedule = Schedule::default();
-        player_schedule.add_systems(systems::advance_timeline_for_player_intent);
-
-        let mut menu_schedule = Schedule::default();
-        menu_schedule.add_systems(systems::menu_navigation);
+        let player_schedule = schedules::player_intent_schedule();
+        let menu_schedule = schedules::menu_schedule();
 
         tracing::debug!("created game schedules");
 
@@ -70,80 +61,4 @@ impl Game {
         // queries ECS state. This keeps drawing separate from deterministic sim.
         render::render(&mut self.world);
     }
-}
-
-pub(crate) fn init_world(world: &mut World) {
-    tracing::info!("initializing world");
-
-    world.insert_resource(Map::generate());
-    world.insert_resource(GameScreen::default());
-    world.insert_resource(PlayerIntent::default());
-    world.insert_resource(MenuInputState::default());
-    world.insert_resource(InputRepeat::default());
-    world.insert_resource(KeyBindings::default());
-    world.insert_resource(PauseMenuState::default());
-    world.insert_resource(InventoryMenuState::default());
-    world.insert_resource(EnergyTimeline::default());
-    world.insert_resource(CargoLossRisk::default());
-    world.insert_resource(Camera::default());
-    world.insert_resource(SimulationClock {
-        turn: 0,
-        delivered_parcels: 0,
-    });
-
-    world.spawn((
-        Player,
-        Position { x: 6, y: 6 },
-        Velocity::default(),
-        Cargo {
-            current_weight: 12.0,
-            max_weight: 40.0,
-        },
-        Stamina {
-            current: 35.0,
-            max: 35.0,
-        },
-        MovementState::default(),
-        Momentum::default(),
-        ActionEnergy::default(),
-    ));
-
-    for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {
-        world.spawn((
-            Agent { id },
-            Position { x, y },
-            Velocity::default(),
-            Cargo {
-                current_weight: 0.0,
-                max_weight: 35.0,
-            },
-            AssignedJob {
-                phase: JobPhase::FindParcel,
-                parcel: None,
-            },
-            ActionEnergy::default(),
-        ));
-    }
-
-    for (x, y, weight) in [
-        (8, 8, 6.0),
-        (18, 15, 9.0),
-        (26, 33, 5.0),
-        (36, 9, 8.0),
-        (55, 19, 7.0),
-    ] {
-        world.spawn((
-            Position { x, y },
-            CargoParcel { weight },
-            ParcelState::Loose,
-        ));
-    }
-
-    tracing::info!(
-        agents = 2,
-        parcels = 5,
-        player_x = 6,
-        player_y = 6,
-        "world initialized"
-    );
 }
