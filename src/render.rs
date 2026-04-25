@@ -4,18 +4,19 @@ use macroquad::prelude::*;
 use crate::components::*;
 use crate::map::Map;
 use crate::resources::{
-    Camera, EnergyTimeline, GameScreen, PauseMenuEntry, PauseMenuState, SimulationClock,
-    DEFAULT_CAMERA_TILE_SPAN,
+    Camera, EnergyTimeline, GameScreen, InventoryMenuState, PauseMenuEntry, PauseMenuState,
+    SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
 };
 
 pub const TILE_SIZE: f32 = 16.0;
 const VIEWPORT_X: f32 = 24.0;
 const VIEWPORT_Y: f32 = 24.0;
 const UI_GAP: f32 = 28.0;
-const CONTROL_HINTS: [&str; 8] = [
+const CONTROL_HINTS: [&str; 9] = [
     "WASD / Arrows: move one tile",
     "Space / .: wait and recover stamina",
     "E: pick up loose cargo here",
+    "I / Tab: open inventory",
     "Shift: toggle walking / sprinting",
     "Esc: pause / resume",
     "Energy advances only on valid action",
@@ -327,10 +328,11 @@ fn draw_ui(world: &mut World, camera: Camera) {
     ui_lines(ui_x, &mut y, &LEGEND_LINES);
 }
 
-fn draw_game_state_overlay(world: &World) {
+fn draw_game_state_overlay(world: &mut World) {
     match *world.resource::<GameScreen>() {
         GameScreen::Playing => {}
         GameScreen::PauseMenu => draw_pause_menu(world.resource::<PauseMenuState>()),
+        GameScreen::InventoryMenu => draw_inventory_menu(world),
         GameScreen::OptionsMenu => draw_options_menu(),
     }
 }
@@ -347,6 +349,67 @@ fn draw_pause_menu(menu: &PauseMenuState) {
         draw_menu_entry(panel_x + 42.0, y, entry.label(), menu.selected() == entry);
         y += 44.0;
     }
+}
+
+fn draw_inventory_menu(world: &mut World) {
+    draw_modal_panel(460.0, 360.0);
+
+    let panel_x = (screen_width() - 460.0) / 2.0;
+    let mut y = (screen_height() - 360.0) / 2.0 + 58.0;
+    draw_text("Inventory", panel_x + 42.0, y, 34.0, WHITE);
+    y += 50.0;
+
+    let entries = inventory_entries(world);
+    if entries.is_empty() {
+        draw_text(
+            "No carried parcels.",
+            panel_x + 42.0,
+            y,
+            22.0,
+            Color::from_rgba(210, 216, 222, 255),
+        );
+        return;
+    }
+
+    let selected_index = world.resource::<InventoryMenuState>().selected_index();
+    for (index, entry) in entries.iter().enumerate() {
+        let label = format!("Parcel {:.0} weight", entry.weight);
+        draw_menu_entry(panel_x + 42.0, y, &label, selected_index == index);
+        y += 38.0;
+    }
+}
+
+struct InventoryEntry {
+    entity: Entity,
+    weight: f32,
+}
+
+fn inventory_entries(world: &mut World) -> Vec<InventoryEntry> {
+    let Some(player_entity) = player_entity(world) else {
+        return Vec::new();
+    };
+
+    let mut query = world.query::<(Entity, &CargoParcel, &ParcelState)>();
+    let mut entries = query
+        .iter(world)
+        .filter_map(|(entity, parcel, state)| {
+            if *state == ParcelState::CarriedBy(player_entity) {
+                Some(InventoryEntry {
+                    entity,
+                    weight: parcel.weight,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.entity.to_bits());
+    entries
+}
+
+fn player_entity(world: &mut World) -> Option<Entity> {
+    let mut query = world.query_filtered::<Entity, With<Player>>();
+    query.iter(world).next()
 }
 
 fn draw_options_menu() {

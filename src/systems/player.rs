@@ -1,12 +1,14 @@
 use bevy_ecs::prelude::*;
 
 use crate::components::*;
-use crate::energy::{ActionEnergy, PICKUP_ENERGY_COST, WAIT_ENERGY_COST};
+use crate::energy::{ActionEnergy, ITEM_ACTION_ENERGY_COST, WAIT_ENERGY_COST};
 use crate::map::Map;
 use crate::movement::{
     resolve_movement, CargoLoad, MovementOutcome, MovementRequest, StaminaBudget,
 };
-use crate::resources::{EnergyTimeline, PlayerAction, PlayerIntent};
+use crate::resources::{
+    EnergyTimeline, GameScreen, InventoryMenuState, PlayerAction, PlayerIntent,
+};
 
 type PlayerActionItem<'a> = (
     Entity,
@@ -24,6 +26,8 @@ pub fn player_actions(
     intent: Res<PlayerIntent>,
     timeline: Res<EnergyTimeline>,
     map: Res<Map>,
+    mut screen: ResMut<GameScreen>,
+    mut inventory_menu: ResMut<InventoryMenuState>,
     mut player_query: Query<PlayerActionItem, With<Player>>,
     mut parcels: Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
 ) {
@@ -55,6 +59,14 @@ pub fn player_actions(
     };
 
     tracing::debug!(?action, now, "processing player action");
+
+    if action == PlayerAction::OpenInventory {
+        let carried_count = carried_parcel_count(entity, &parcels);
+        inventory_menu.clamp_to_item_count(carried_count);
+        *screen = GameScreen::InventoryMenu;
+        tracing::debug!(carried_count, "opened inventory");
+        return;
+    }
 
     if action == PlayerAction::Wait {
         stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
@@ -108,7 +120,7 @@ pub fn player_actions(
         }
         PlayerAction::PickUp => {
             if pick_up_loose_parcel(entity, *position, &mut cargo, &mut parcels) {
-                energy.spend(now, PICKUP_ENERGY_COST);
+                energy.spend(now, ITEM_ACTION_ENERGY_COST);
                 tracing::info!(
                     x = position.x,
                     y = position.y,
@@ -130,8 +142,19 @@ pub fn player_actions(
                 "player movement mode changed"
             );
         }
+        PlayerAction::OpenInventory => {}
         PlayerAction::Wait => {}
     }
+}
+
+fn carried_parcel_count(
+    holder: Entity,
+    parcels: &Query<(Entity, &Position, &CargoParcel, &mut ParcelState), Without<Player>>,
+) -> usize {
+    parcels
+        .iter()
+        .filter(|(_, _, _, state)| **state == ParcelState::CarriedBy(holder))
+        .count()
 }
 
 fn pick_up_loose_parcel(
@@ -162,6 +185,15 @@ mod tests {
     use super::*;
     use crate::map::Terrain;
     use crate::resources::Direction;
+
+    fn insert_player_action_resources(world: &mut World, action: PlayerAction) {
+        world.insert_resource(PlayerIntent {
+            action: Some(action),
+        });
+        world.insert_resource(EnergyTimeline::default());
+        world.insert_resource(GameScreen::Playing);
+        world.insert_resource(InventoryMenuState::default());
+    }
 
     fn spawn_test_parcel(world: &mut World, position: Position) {
         world.spawn((position, CargoParcel { weight: 5.0 }, ParcelState::Loose));
@@ -210,10 +242,7 @@ mod tests {
             (0, 1) => Direction::South,
             _ => unreachable!("test movement should be cardinal"),
         };
-        world.insert_resource(PlayerIntent {
-            action: Some(PlayerAction::Move(direction)),
-        });
-        world.insert_resource(EnergyTimeline::default());
+        insert_player_action_resources(world, PlayerAction::Move(direction));
         spawn_test_player(world, start, stamina);
 
         let mut schedule = Schedule::default();
@@ -225,10 +254,7 @@ mod tests {
     fn failed_player_movement_does_not_consume_turn() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(PlayerIntent {
-            action: Some(PlayerAction::Move(Direction::West)),
-        });
-        world.insert_resource(EnergyTimeline::default());
+        insert_player_action_resources(&mut world, PlayerAction::Move(Direction::West));
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
@@ -305,10 +331,7 @@ mod tests {
     fn wait_consumes_turn_and_recovers_stamina() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(PlayerIntent {
-            action: Some(PlayerAction::Wait),
-        });
-        world.insert_resource(EnergyTimeline::default());
+        insert_player_action_resources(&mut world, PlayerAction::Wait);
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 10.0);
 
         let mut schedule = Schedule::default();
@@ -334,10 +357,7 @@ mod tests {
     fn toggling_sprint_changes_movement_mode_without_consuming_turn() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(PlayerIntent {
-            action: Some(PlayerAction::ToggleSprint),
-        });
-        world.insert_resource(EnergyTimeline::default());
+        insert_player_action_resources(&mut world, PlayerAction::ToggleSprint);
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
@@ -363,13 +383,31 @@ mod tests {
     }
 
     #[test]
+    fn opening_inventory_changes_screen_without_consuming_turn() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        insert_player_action_resources(&mut world, PlayerAction::OpenInventory);
+        spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_actions);
+        schedule.run(&mut world);
+
+        assert_eq!(*world.resource::<GameScreen>(), GameScreen::InventoryMenu);
+
+        let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
+        let energy = energy_query
+            .iter(&world)
+            .next()
+            .expect("test player should exist");
+        assert_eq!(energy.ready_at, 0);
+    }
+
+    #[test]
     fn player_can_pick_up_loose_parcel_on_same_tile() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(PlayerIntent {
-            action: Some(PlayerAction::PickUp),
-        });
-        world.insert_resource(EnergyTimeline::default());
+        insert_player_action_resources(&mut world, PlayerAction::PickUp);
         spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
         spawn_test_parcel(&mut world, Position { x: 2, y: 2 });
 
@@ -403,10 +441,7 @@ mod tests {
     fn failed_pickup_does_not_consume_turn() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
-        world.insert_resource(PlayerIntent {
-            action: Some(PlayerAction::PickUp),
-        });
-        world.insert_resource(EnergyTimeline::default());
+        insert_player_action_resources(&mut world, PlayerAction::PickUp);
         spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
 
         let mut schedule = Schedule::default();

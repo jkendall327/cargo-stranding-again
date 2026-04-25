@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 
 use crate::components::*;
-use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, PICKUP_ENERGY_COST};
+use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, ITEM_ACTION_ENERGY_COST};
 use crate::map::Map;
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
 use crate::resources::{Direction, EnergyTimeline, SimulationClock};
@@ -79,7 +79,7 @@ pub fn agent_jobs(
                         *parcel_state = ParcelState::CarriedBy(agent_entity);
                         cargo.current_weight += parcel.weight;
                         job.phase = JobPhase::GoToDepot;
-                        energy.spend(now, PICKUP_ENERGY_COST);
+                        energy.spend(now, ITEM_ACTION_ENERGY_COST);
                         tracing::debug!(
                             agent = ?agent_entity,
                             cargo = cargo.current_weight,
@@ -110,7 +110,7 @@ pub fn agent_jobs(
                         clock.delivered_parcels += 1;
                         job.phase = JobPhase::Done;
                         job.parcel = None;
-                        energy.spend(now, PICKUP_ENERGY_COST);
+                        energy.spend(now, ITEM_ACTION_ENERGY_COST);
                         tracing::info!(
                             agent = ?agent_entity,
                             delivered_parcels = clock.delivered_parcels,

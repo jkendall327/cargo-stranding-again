@@ -42,6 +42,10 @@ impl Default for KeyBindings {
                     action: PlayerAction::Wait,
                 },
                 KeyBinding {
+                    keys: vec![KeyCode::I, KeyCode::Tab],
+                    action: PlayerAction::OpenInventory,
+                },
+                KeyBinding {
                     keys: vec![KeyCode::E],
                     action: PlayerAction::PickUp,
                 },
@@ -103,8 +107,15 @@ fn current_menu_action(game_screen: GameScreen, keybindings: &KeyBindings) -> Op
     }
 
     match game_screen {
-        GameScreen::Playing | GameScreen::OptionsMenu => None,
-        GameScreen::PauseMenu => Some(action),
+        GameScreen::Playing => None,
+        GameScreen::PauseMenu | GameScreen::InventoryMenu => Some(action),
+        GameScreen::OptionsMenu => {
+            if action == MenuAction::Cancel {
+                Some(action)
+            } else {
+                None
+            }
+        }
     }
 }
 

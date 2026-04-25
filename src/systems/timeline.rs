@@ -2,6 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::components::Player;
 use crate::energy::ActionEnergy;
+use crate::map::Map;
 use crate::resources::{EnergyTimeline, PlayerIntent, SimulationClock};
 use crate::systems::agents::{agent_jobs, assign_agent_jobs};
 use crate::systems::player::player_actions;
@@ -20,9 +21,15 @@ pub fn advance_timeline_for_player_intent(world: &mut World) {
     }
 
     if process_player_action(world) {
-        world.resource_mut::<SimulationClock>().turn += 1;
-        if let Some(player_ready_at) = player_ready_at(world) {
-            world.resource_mut::<EnergyTimeline>().now = player_ready_at;
+        advance_after_player_action_spent(world);
+    }
+}
+
+pub(crate) fn advance_after_player_action_spent(world: &mut World) {
+    world.resource_mut::<SimulationClock>().turn += 1;
+    if let Some(player_ready_at) = player_ready_at(world) {
+        world.resource_mut::<EnergyTimeline>().now = player_ready_at;
+        if world.contains_resource::<Map>() {
             catch_up_agents(world);
         }
     }

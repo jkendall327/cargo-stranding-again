@@ -126,6 +126,7 @@ impl HeadlessCommand {
             "west" | "w" | "left" => PlayerAction::Move(Direction::West),
             "east" | "e" | "right" => PlayerAction::Move(Direction::East),
             "wait" | "." => PlayerAction::Wait,
+            "inventory" | "inv" => PlayerAction::OpenInventory,
             "pickup" | "pick-up" | "pick_up" => PlayerAction::PickUp,
             "sprint" | "toggle-sprint" | "toggle_sprint" => PlayerAction::ToggleSprint,
             _ => return None,

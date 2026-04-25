@@ -29,6 +29,7 @@ Already done:
 - [x] Turns only advance when a player action actually consumes a turn.
 - [x] The player has basic stamina and cargo-weight movement effects.
 - [x] NPC porters can reserve, pick up, and deliver simple cargo parcels.
+- [x] Inventory menu can list carried parcels and drop the selected parcel.
 
 ## North Star Architecture
 
@@ -96,14 +97,16 @@ Goal: grow `PlayerAction` deliberately without turning it into input-shaped move
   - [x] Persistent sprint posture via `ToggleSprint` + `Move(Direction)`
   - [ ] `Crawl(Direction)`
   - [x] `PickUp`
-  - [ ] `Drop`
+  - [x] `Drop` via inventory menu confirm for temporary cargo parcels
   - [ ] `Interact`
-  - [ ] `OpenInventory`
+  - [x] `OpenInventory`
   - [ ] `AdjustBalance(BalanceShift)`
 - [x] Decide whether movement modes are selected by action (`Sprint(North)`) or by a persistent component (`MovementMode::Sprinting` plus `Move(North)`).
 - [x] Add a player movement-state component when the first non-walking mode needs persistence.
-- [ ] Keep menu actions separate from gameplay actions.
-- [ ] Keep contextual actions resolved after input, not inside keybinding lookup.
+- [x] Keep menu actions separate from gameplay actions.
+- [x] Keep contextual actions resolved after input, not inside keybinding lookup.
+- [x] Add a reusable menu selection state so new menus do not each grow one-off cursor logic.
+- [x] Add an inventory screen that pauses simulation and uses menu navigation actions.
 
 ## 3. Action Energy Timeline
 
@@ -158,6 +161,8 @@ Implementation tasks:
 - [x] Update pickup/drop and wait/rest to spend action energy.
   - [x] Successful pickup spends energy.
   - [x] Failed pickup spends no energy for now.
+  - [x] Successful inventory drop spends energy.
+  - [x] Failed inventory drop spends no energy for now.
   - [x] Wait/rest spends energy and restores stamina.
 - [x] Add UI/debug output.
   - [x] Show player energy/ready state.
@@ -169,6 +174,7 @@ Implementation tasks:
   - [x] Failed movement spends no energy.
   - [x] Successful pickup spends energy.
   - [x] Failed pickup spends no energy.
+  - [x] Successful inventory drop spends energy and updates the timeline.
   - [x] Faster actor can act more often than slower actor over the same timeline.
   - [x] NPC delivery still progresses under energy scheduling.
 
@@ -200,6 +206,7 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
 - [ ] Rework `CargoParcel` / `ParcelState` to use the new item relationship model.
 - [ ] Add pickup/drop systems.
   - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
+  - [x] Drop a carried parcel at the player position using the temporary parcel/cargo model.
   - [ ] Pick up a loose item at the actor position.
   - [ ] Fail clearly if the slot is occupied.
   - [ ] Fail clearly if weight/volume capacity is exceeded.
@@ -213,12 +220,13 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
 - [ ] Add tests.
   - [ ] Cannot pick up oversized cargo.
   - [ ] Cannot put cargo into a full container.
-  - [ ] Dropping cargo makes it loose at the actor position.
+  - [x] Dropping temporary parcel cargo makes it loose at the actor position.
   - [ ] NPC delivery still increments delivered parcel count.
 
 Notes:
 
 - Existing parcel state is in `src/components.rs::ParcelState`.
+- Temporary player inventory currently lists `CargoParcel` entities with `ParcelState::CarriedBy(player)`.
 - Existing porter job code directly adds/subtracts parcel weight from `Cargo`.
 - This is probably the largest near-term domain change.
 

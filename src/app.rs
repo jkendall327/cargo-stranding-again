@@ -7,8 +7,8 @@ use crate::input::KeyBindings;
 use crate::map::Map;
 use crate::render;
 use crate::resources::{
-    Camera, EnergyTimeline, GameScreen, InputRepeat, MenuInputState, PauseMenuState, PlayerIntent,
-    SimulationClock,
+    Camera, EnergyTimeline, GameScreen, InputRepeat, InventoryMenuState, MenuInputState,
+    PauseMenuState, PlayerIntent, SimulationClock,
 };
 use crate::systems;
 
@@ -82,6 +82,7 @@ pub(crate) fn init_world(world: &mut World) {
     world.insert_resource(InputRepeat::default());
     world.insert_resource(KeyBindings::default());
     world.insert_resource(PauseMenuState::default());
+    world.insert_resource(InventoryMenuState::default());
     world.insert_resource(EnergyTimeline::default());
     world.insert_resource(Camera::default());
     world.insert_resource(SimulationClock {

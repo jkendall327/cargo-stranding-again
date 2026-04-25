@@ -5,7 +5,7 @@ use crate::movement::MovementMode;
 
 pub const WALK_ENERGY_COST: u32 = 100;
 pub const WAIT_ENERGY_COST: u32 = 100;
-pub const PICKUP_ENERGY_COST: u32 = 100;
+pub const ITEM_ACTION_ENERGY_COST: u32 = 100;
 pub const DEFAULT_ACTION_ENERGY_COST: u32 = 100;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
