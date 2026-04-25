@@ -1,13 +1,16 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
+mod view_model;
+
 use crate::cargo::player_carried_parcels;
 use crate::components::*;
 use crate::map::{Map, Terrain, TileCoord};
 use crate::resources::{
-    Camera, DeliveryStats, EnergyTimeline, GameScreen, InventoryMenuState, PauseMenuEntry,
-    PauseMenuState, SimulationClock, DEFAULT_CAMERA_TILE_SPAN,
+    Camera, GameScreen, InventoryMenuState, PauseMenuEntry, PauseMenuState,
+    DEFAULT_CAMERA_TILE_SPAN,
 };
+use view_model::{PlayerHudSnapshot, PorterDebugRow};
 
 pub const TILE_SIZE: f32 = 16.0;
 const VIEWPORT_X: f32 = 24.0;
@@ -308,6 +311,8 @@ fn draw_player(world: &mut World, camera: Camera) {
 }
 
 fn draw_ui(world: &mut World, camera: Camera) {
+    let hud = PlayerHudSnapshot::from_world(world, camera).expect("player exists for UI");
+    let porter_rows = PorterDebugRow::all_from_world(world);
     let ui_x = ui_x(camera);
     draw_rectangle(
         ui_x - 12.0,
@@ -317,96 +322,72 @@ fn draw_ui(world: &mut World, camera: Camera) {
         Color::from_rgba(24, 27, 31, 245),
     );
 
-    let clock = *world.resource::<SimulationClock>();
-    let delivery_stats = *world.resource::<DeliveryStats>();
-    let timeline = *world.resource::<EnergyTimeline>();
-    let mut player_query = world.query_filtered::<(
-        &Position,
-        &Stamina,
-        &Cargo,
-        &MovementState,
-        &Momentum,
-        &ActionEnergy,
-    ), With<Player>>();
-    let (player_position, stamina, cargo, movement_state, momentum, player_energy) = player_query
-        .iter(world)
-        .next()
-        .expect("player exists for UI");
-
     let mut y = 34.0;
     draw_text("Cargo Stranding Again", ui_x, y, 26.0, WHITE);
     y += 34.0;
     draw_text("Macroquad frame loop + Bevy ECS sim", ui_x, y, 18.0, GRAY);
     y += 38.0;
 
-    ui_line(ui_x, &mut y, &format!("Turn: {}", clock.turn));
-    ui_line(ui_x, &mut y, &format!("Energy time: {}", timeline.now));
+    ui_line(ui_x, &mut y, &format!("Turn: {}", hud.turn));
+    ui_line(ui_x, &mut y, &format!("Energy time: {}", hud.timeline));
     ui_line(
         ui_x,
         &mut y,
         &format!(
             "Camera: {},{} | {}x{}",
-            camera.x, camera.y, camera.width, camera.height
+            hud.camera.x, hud.camera.y, hud.camera.width, hud.camera.height
         ),
     );
     ui_line(
         ui_x,
         &mut y,
-        &format!("Player: {}, {}", player_position.x, player_position.y),
-    );
-    {
-        let map = world.resource::<Map>();
-        let player_coord = TileCoord::from(*player_position);
-        let elevation = map.elevation_at_coord(player_coord).unwrap_or_default();
-        let water_depth = map.water_depth_at_coord(player_coord).unwrap_or_default();
-        ui_line(
-            ui_x,
-            &mut y,
-            &format!("Elevation: {elevation} | water depth: {water_depth}"),
-        );
-    }
-    ui_line(
-        ui_x,
-        &mut y,
-        &format!("Stamina: {:.1}/{:.1}", stamina.current, stamina.max),
+        &format!("Player: {}, {}", hud.position.x, hud.position.y),
     );
     ui_line(
         ui_x,
         &mut y,
-        &format!("Movement: {}", movement_state.mode.label()),
+        &format!(
+            "Elevation: {} | water depth: {}",
+            hud.elevation, hud.water_depth
+        ),
+    );
+    ui_line(
+        ui_x,
+        &mut y,
+        &format!("Stamina: {:.1}/{:.1}", hud.stamina_current, hud.stamina_max),
+    );
+    ui_line(
+        ui_x,
+        &mut y,
+        &format!("Movement: {}", hud.movement_mode.label()),
     );
     ui_line(
         ui_x,
         &mut y,
         &format!(
             "Momentum: {:.1} {}",
-            momentum.amount,
-            momentum
-                .direction
+            hud.momentum_amount,
+            hud.momentum_direction
                 .map(|direction| direction.label())
                 .unwrap_or("none")
         ),
     );
+    ui_line(ui_x, &mut y, &format!("Ready: {}", hud.ready_label));
     ui_line(
         ui_x,
         &mut y,
-        &format!("Ready: {}", ready_label(*player_energy, timeline.now)),
+        &format!("Cargo: {:.1}/{:.1}", hud.cargo_current, hud.cargo_max),
     );
     ui_line(
         ui_x,
         &mut y,
-        &format!("Cargo: {:.1}/{:.1}", cargo.current_weight, cargo.max_weight),
-    );
-    ui_line(
-        ui_x,
-        &mut y,
-        &format!("Delivered parcels: {}", delivery_stats.delivered_parcels),
+        &format!("Delivered parcels: {}", hud.delivered_parcels),
     );
     y += 18.0;
 
     draw_text("Porters", ui_x, y, 22.0, WHITE);
     y += 28.0;
-    draw_agent_debug(world, ui_x, &mut y);
+    draw_porter_debug_rows(&porter_rows, ui_x, &mut y);
     y += 18.0;
 
     draw_text("Controls", ui_x, y, 22.0, WHITE);
@@ -525,40 +506,16 @@ fn draw_menu_entry(x: f32, y: f32, label: &str, selected: bool) {
     draw_text(label, x + 34.0, y, 26.0, color);
 }
 
-fn draw_agent_debug(world: &mut World, ui_x: f32, y: &mut f32) {
-    let timeline = world.resource::<EnergyTimeline>().now;
-    let mut query = world.query::<(&Position, &Agent, &Cargo, &AssignedJob, &ActionEnergy)>();
-    let mut rows = query.iter(world).collect::<Vec<_>>();
-    rows.sort_by_key(|(_, agent, _, _, _)| agent.id);
-
-    for (position, agent, cargo, job, energy) in rows {
-        let phase = match job.phase {
-            JobPhase::FindParcel => "finding",
-            JobPhase::GoToParcel => "to parcel",
-            JobPhase::GoToDepot => "to depot",
-            JobPhase::Done => "done",
-        };
+fn draw_porter_debug_rows(rows: &[PorterDebugRow], ui_x: f32, y: &mut f32) {
+    for row in rows {
         ui_line(
             ui_x,
             y,
             &format!(
                 "P{}: {},{} | {} | load {:.0} | {}",
-                agent.id,
-                position.x,
-                position.y,
-                phase,
-                cargo.current_weight,
-                ready_label(*energy, timeline)
+                row.id, row.position.x, row.position.y, row.phase_label, row.load, row.ready_label
             ),
         );
-    }
-}
-
-fn ready_label(energy: ActionEnergy, now: u64) -> String {
-    if energy.is_ready(now) {
-        "ready".to_owned()
-    } else {
-        format!("ready in {}", energy.ready_at - now)
     }
 }
 
