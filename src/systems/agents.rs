@@ -80,6 +80,11 @@ pub fn agent_jobs(
                         cargo.current_weight += parcel.weight;
                         job.phase = JobPhase::GoToDepot;
                         energy.spend(now, PICKUP_ENERGY_COST);
+                        tracing::debug!(
+                            agent = ?agent_entity,
+                            cargo = cargo.current_weight,
+                            "agent picked up parcel"
+                        );
                         continue;
                     }
 
@@ -106,6 +111,11 @@ pub fn agent_jobs(
                         job.phase = JobPhase::Done;
                         job.parcel = None;
                         energy.spend(now, PICKUP_ENERGY_COST);
+                        tracing::info!(
+                            agent = ?agent_entity,
+                            delivered_parcels = clock.delivered_parcels,
+                            "agent delivered parcel"
+                        );
                         continue;
                     }
 

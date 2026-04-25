@@ -35,6 +35,8 @@ impl Game {
         let mut menu_schedule = Schedule::default();
         menu_schedule.add_systems(systems::menu_navigation);
 
+        tracing::debug!("created game schedules");
+
         Self {
             world,
             player_schedule,
@@ -71,6 +73,8 @@ impl Game {
 }
 
 pub(crate) fn init_world(world: &mut World) {
+    tracing::info!("initializing world");
+
     world.insert_resource(Map::generate());
     world.insert_resource(GameScreen::default());
     world.insert_resource(PlayerIntent::default());
@@ -131,4 +135,12 @@ pub(crate) fn init_world(world: &mut World) {
             ParcelState::Loose,
         ));
     }
+
+    tracing::info!(
+        agents = 2,
+        parcels = 5,
+        player_x = 6,
+        player_y = 6,
+        "world initialized"
+    );
 }

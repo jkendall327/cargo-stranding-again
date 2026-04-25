@@ -10,6 +10,17 @@ The current codebase is a small but healthy Bevy ECS + Macroquad prototype. Keep
 - Normal terrain should stay in map/chunk arrays, not become ECS entities.
 - ECS entities are for things that behave: player, NPCs, cargo, containers, ropes, vehicles, fires, doors, buildables, etc.
 
+Dependency notes:
+
+- Keep dependencies small and purpose-driven.
+- [x] Add `tracing` / `tracing-subscriber` for basic structured logging.
+- [ ] Consider `pathfinding` when replacing NPC greedy stepping.
+  - Useful first targets: BFS for passability-only paths, then A* or Dijkstra once terrain cost matters.
+  - Keep it wrapped behind a small local pathing API so the rest of the sim does not care which algorithm crate is underneath.
+- [ ] Consider `rand` with a portable seeded RNG, or `rand_chacha`, once map/content generation needs seeds.
+  - Use deterministic seeds for generated maps, parcel placement, weather rolls, and test fixtures.
+  - Avoid thread-local randomness in simulation systems so headless runs stay reproducible.
+
 Already done:
 
 - [x] Raw key presses are mapped through `src/input.rs` `KeyBindings`.
@@ -251,6 +262,8 @@ Goal: move from hardcoded porter delivery behavior toward simple goal-driven age
   - [ ] target tile
   - [ ] delivery depot / destination
 - [ ] Replace greedy movement with pathfinding.
+  - [ ] Consider adding the `pathfinding` crate for BFS/A*/Dijkstra rather than hand-rolling graph search.
+  - [ ] Add a small `pathing` module that converts `Map` passability/costs into pathfinding successors.
   - [ ] Start with BFS or A* on the current fixed map.
   - [ ] Account for passability first.
   - [ ] Later account for terrain movement cost, stamina, load, and danger.

@@ -54,9 +54,16 @@ pub fn player_actions(
         return;
     };
 
+    tracing::debug!(?action, now, "processing player action");
+
     if action == PlayerAction::Wait {
         stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
         energy.spend(now, WAIT_ENERGY_COST);
+        tracing::debug!(
+            ready_at = energy.ready_at,
+            stamina = stamina.current,
+            "player waited"
+        );
         return;
     }
 
@@ -82,15 +89,46 @@ pub fn player_actions(
                 velocity.dy = result.actual_delta.1;
                 stamina.current = (stamina.current + result.stamina_delta).clamp(0.0, stamina.max);
                 energy.spend(now, result.energy_cost);
+                tracing::debug!(
+                    x = position.x,
+                    y = position.y,
+                    terrain = ?result.terrain,
+                    energy_cost = result.energy_cost,
+                    stamina = stamina.current,
+                    "player moved"
+                );
+            } else {
+                tracing::debug!(
+                    outcome = ?outcome,
+                    target_x = result.target.x,
+                    target_y = result.target.y,
+                    "player movement did not resolve"
+                );
             }
         }
         PlayerAction::PickUp => {
             if pick_up_loose_parcel(entity, *position, &mut cargo, &mut parcels) {
                 energy.spend(now, PICKUP_ENERGY_COST);
+                tracing::info!(
+                    x = position.x,
+                    y = position.y,
+                    cargo = cargo.current_weight,
+                    "player picked up parcel"
+                );
+            } else {
+                tracing::debug!(
+                    x = position.x,
+                    y = position.y,
+                    "player pickup found no parcel"
+                );
             }
         }
         PlayerAction::ToggleSprint => {
             movement_state.toggle_sprint();
+            tracing::info!(
+                mode = movement_state.mode.label(),
+                "player movement mode changed"
+            );
         }
         PlayerAction::Wait => {}
     }

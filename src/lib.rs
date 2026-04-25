@@ -3,6 +3,7 @@ pub mod components;
 pub mod energy;
 pub mod headless;
 pub mod input;
+pub mod logging;
 pub mod map;
 pub mod movement;
 pub mod render;

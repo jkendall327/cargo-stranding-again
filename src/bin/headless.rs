@@ -2,15 +2,22 @@ use std::env;
 use std::fmt::Write;
 use std::process::ExitCode;
 
-use cargo_stranding_again::headless::{HeadlessCommand, HeadlessGame, HeadlessSnapshot};
+use cargo_stranding_again::{
+    headless::{HeadlessCommand, HeadlessGame, HeadlessSnapshot},
+    logging,
+};
 
 fn main() -> ExitCode {
+    logging::init();
+
     let mut args = env::args().skip(1).peekable();
     if args.peek().is_none() {
+        tracing::info!("headless invoked without commands");
         print_usage();
         return ExitCode::SUCCESS;
     }
 
+    tracing::info!("starting headless run");
     let mut game = HeadlessGame::new();
     print_snapshot("start", game.snapshot());
 
@@ -19,6 +26,7 @@ fn main() -> ExitCode {
             match args.next() {
                 Some(direction) => direction,
                 None => {
+                    tracing::warn!("headless command parse failed: missing direction after move");
                     eprintln!("missing direction after 'move'");
                     return ExitCode::from(2);
                 }
@@ -28,6 +36,7 @@ fn main() -> ExitCode {
         };
 
         let Some(command) = HeadlessCommand::from_token(&command_token) else {
+            tracing::warn!(command = command_token, "unknown headless command");
             eprintln!("unknown headless command: {command_token}");
             print_usage();
             return ExitCode::from(2);
@@ -35,12 +44,14 @@ fn main() -> ExitCode {
 
         match command {
             HeadlessCommand::Action(action) => {
+                tracing::debug!(?action, "running headless action");
                 game.step(action);
                 print_snapshot(&format!("{action:?}"), game.snapshot());
             }
         }
     }
 
+    tracing::info!("finished headless run");
     ExitCode::SUCCESS
 }
 

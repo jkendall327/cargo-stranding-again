@@ -20,6 +20,8 @@ impl HeadlessGame {
         let mut player_schedule = Schedule::default();
         player_schedule.add_systems(systems::advance_timeline_for_player_intent);
 
+        tracing::debug!("created headless game");
+
         Self {
             world,
             player_schedule,
@@ -27,6 +29,8 @@ impl HeadlessGame {
     }
 
     pub fn step(&mut self, action: PlayerAction) {
+        tracing::debug!(?action, "headless step");
+
         *self.world.resource_mut::<PlayerIntent>() = PlayerIntent {
             action: Some(action),
         };
