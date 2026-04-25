@@ -51,89 +51,86 @@ pub fn agent_jobs(
         velocity.dx = 0;
         velocity.dy = 0;
 
-        for _ in 0..128 {
-            if !energy.is_ready(now) {
-                break;
-            }
+        if !energy.is_ready(now) {
+            continue;
+        }
 
-            let Some(parcel_entity) = job.parcel else {
-                break;
-            };
-            let Ok((parcel_position, parcel, mut parcel_state)) = parcels.get_mut(parcel_entity)
-            else {
-                job.phase = JobPhase::FindParcel;
-                job.parcel = None;
-                break;
-            };
+        let Some(parcel_entity) = job.parcel else {
+            continue;
+        };
+        let Ok((parcel_position, parcel, mut parcel_state)) = parcels.get_mut(parcel_entity) else {
+            job.phase = JobPhase::FindParcel;
+            job.parcel = None;
+            continue;
+        };
 
-            match job.phase {
-                JobPhase::FindParcel | JobPhase::Done => break,
-                JobPhase::GoToParcel => {
-                    if *parcel_state != ParcelState::AssignedTo(agent_entity) {
-                        job.phase = JobPhase::FindParcel;
-                        job.parcel = None;
-                        break;
-                    }
-
-                    if position.x == parcel_position.x && position.y == parcel_position.y {
-                        *parcel_state = ParcelState::CarriedBy(agent_entity);
-                        cargo.current_weight += parcel.weight;
-                        job.phase = JobPhase::GoToDepot;
-                        energy.spend(now, ITEM_ACTION_ENERGY_COST);
-                        tracing::debug!(
-                            agent = ?agent_entity,
-                            cargo = cargo.current_weight,
-                            "agent picked up parcel"
-                        );
-                        continue;
-                    }
-
-                    if let Some(moved) = greedy_step(
-                        map,
-                        agent_entity,
-                        &mut position,
-                        cargo.current_weight,
-                        cargo.max_weight,
-                        *parcel_position,
-                    ) {
-                        velocity.dx = moved.actual_delta.0;
-                        velocity.dy = moved.actual_delta.1;
-                        energy.spend(now, moved.energy_cost);
-                    } else {
-                        energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
-                    }
+        match job.phase {
+            JobPhase::FindParcel | JobPhase::Done => {}
+            JobPhase::GoToParcel => {
+                if *parcel_state != ParcelState::AssignedTo(agent_entity) {
+                    job.phase = JobPhase::FindParcel;
+                    job.parcel = None;
+                    continue;
                 }
-                JobPhase::GoToDepot => {
-                    let depot = map.depot_coord();
-                    if TileCoord::from(*position) == depot {
-                        *parcel_state = ParcelState::Delivered;
-                        cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
-                        delivery_stats.delivered_parcels += 1;
-                        job.phase = JobPhase::Done;
-                        job.parcel = None;
-                        energy.spend(now, ITEM_ACTION_ENERGY_COST);
-                        tracing::info!(
-                            agent = ?agent_entity,
-                            delivered_parcels = delivery_stats.delivered_parcels,
-                            "agent delivered parcel"
-                        );
-                        continue;
-                    }
 
-                    if let Some(moved) = greedy_step(
-                        map,
-                        agent_entity,
-                        &mut position,
-                        cargo.current_weight,
-                        cargo.max_weight,
-                        Position::from(depot),
-                    ) {
-                        velocity.dx = moved.actual_delta.0;
-                        velocity.dy = moved.actual_delta.1;
-                        energy.spend(now, moved.energy_cost);
-                    } else {
-                        energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
-                    }
+                if position.x == parcel_position.x && position.y == parcel_position.y {
+                    *parcel_state = ParcelState::CarriedBy(agent_entity);
+                    cargo.current_weight += parcel.weight;
+                    job.phase = JobPhase::GoToDepot;
+                    energy.spend(now, ITEM_ACTION_ENERGY_COST);
+                    tracing::debug!(
+                        agent = ?agent_entity,
+                        cargo = cargo.current_weight,
+                        "agent picked up parcel"
+                    );
+                    continue;
+                }
+
+                if let Some(moved) = greedy_step(
+                    map,
+                    agent_entity,
+                    &mut position,
+                    cargo.current_weight,
+                    cargo.max_weight,
+                    *parcel_position,
+                ) {
+                    velocity.dx = moved.actual_delta.0;
+                    velocity.dy = moved.actual_delta.1;
+                    energy.spend(now, moved.energy_cost);
+                } else {
+                    energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
+                }
+            }
+            JobPhase::GoToDepot => {
+                let depot = map.depot_coord();
+                if TileCoord::from(*position) == depot {
+                    *parcel_state = ParcelState::Delivered;
+                    cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
+                    delivery_stats.delivered_parcels += 1;
+                    job.phase = JobPhase::Done;
+                    job.parcel = None;
+                    energy.spend(now, ITEM_ACTION_ENERGY_COST);
+                    tracing::info!(
+                        agent = ?agent_entity,
+                        delivered_parcels = delivery_stats.delivered_parcels,
+                        "agent delivered parcel"
+                    );
+                    continue;
+                }
+
+                if let Some(moved) = greedy_step(
+                    map,
+                    agent_entity,
+                    &mut position,
+                    cargo.current_weight,
+                    cargo.max_weight,
+                    Position::from(depot),
+                ) {
+                    velocity.dx = moved.actual_delta.0;
+                    velocity.dy = moved.actual_delta.1;
+                    energy.spend(now, moved.energy_cost);
+                } else {
+                    energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
                 }
             }
         }
@@ -291,5 +288,46 @@ mod tests {
             .filter(|cargo| cargo.current_weight == 0.0)
             .count();
         assert_eq!(empty_agents, 1);
+    }
+
+    #[test]
+    fn ready_agent_takes_only_one_job_action_per_schedule_run() {
+        let mut world = World::new();
+        let map = Map::generate();
+        let depot = map.depot_coord();
+        world.insert_resource(map);
+        world.insert_resource(DeliveryStats::default());
+        world.insert_resource(EnergyTimeline::default());
+        spawn_test_agent(
+            &mut world,
+            0,
+            Position {
+                x: depot.x,
+                y: depot.y,
+            },
+        );
+        spawn_test_parcel(
+            &mut world,
+            Position {
+                x: depot.x,
+                y: depot.y,
+            },
+        );
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems((assign_agent_jobs, agent_jobs).chain());
+        schedule.run(&mut world);
+
+        assert_eq!(world.resource::<DeliveryStats>().delivered_parcels, 0);
+
+        let mut parcel_query = world.query::<&ParcelState>();
+        assert!(parcel_query
+            .iter(&world)
+            .any(|state| matches!(state, ParcelState::CarriedBy(_))));
+
+        let mut agent_query = world.query_filtered::<(&AssignedJob, &ActionEnergy), With<Agent>>();
+        let (job, energy) = agent_query.single(&world).unwrap();
+        assert!(matches!(job.phase, JobPhase::GoToDepot));
+        assert_eq!(energy.ready_at, u64::from(ITEM_ACTION_ENERGY_COST));
     }
 }

@@ -17,7 +17,7 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
 
 pub(crate) fn agent_phase_schedule() -> Schedule {
     let mut schedule = Schedule::default();
-    schedule.add_systems((systems::assign_agent_jobs, systems::agent_jobs));
+    schedule.add_systems((systems::assign_agent_jobs, systems::agent_jobs).chain());
     schedule
 }
 

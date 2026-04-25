@@ -33,6 +33,12 @@ ASCII camera view automatically. Add `"view": true` to print that view on
 success too. Headless logs are quiet by default; set `RUST_LOG` when you need
 tracing output.
 
+## Docs
+
+- `docs/energy-timeline.md` explains the action energy timeline, player pacing,
+  NPC catch-up, and scheduler split.
+- `docs/map-coords.md` explains world tile coordinates, chunks, and map lookup.
+
 ## Controls
 
 - Move with `WASD` or arrow keys.
