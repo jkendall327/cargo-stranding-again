@@ -60,16 +60,13 @@ type ItemState<'a> = (
     Option<&'a ParcelState>,
 );
 
-/// Resolves cargo requests into entity relationship changes.
+/// Resolves pickup requests into entity relationship changes.
 ///
 /// Callers choose the intended target; this system owns the legality checks and
 /// structural mutation so player, inventory, and autonomous actors share rules.
-#[allow(clippy::too_many_arguments)]
-pub fn resolve_cargo_requests(
+pub fn resolve_pickup_requests(
     mut commands: Commands,
     mut pickup_requests: MessageReader<PickUpRequest>,
-    mut drop_requests: MessageReader<DropRequest>,
-    mut deliver_requests: MessageReader<DeliverRequest>,
     mut changed: MessageWriter<CargoChanged>,
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
@@ -99,7 +96,17 @@ pub fn resolve_cargo_requests(
             result,
         });
     }
+}
 
+/// Resolves drop requests into entity relationship changes.
+pub fn resolve_drop_requests(
+    mut commands: Commands,
+    mut drop_requests: MessageReader<DropRequest>,
+    mut changed: MessageWriter<CargoChanged>,
+    mut results: MessageWriter<CargoActionResult>,
+    cargo: Query<&Cargo>,
+    items: Query<ItemState>,
+) {
     for request in drop_requests.read() {
         let result = validate_drop(&cargo, &items, request.actor, request.item);
         if result.is_ok() {
@@ -121,7 +128,17 @@ pub fn resolve_cargo_requests(
             result,
         });
     }
+}
 
+/// Resolves delivery requests into entity relationship changes.
+pub fn resolve_delivery_requests(
+    mut commands: Commands,
+    mut deliver_requests: MessageReader<DeliverRequest>,
+    mut changed: MessageWriter<CargoChanged>,
+    mut results: MessageWriter<CargoActionResult>,
+    cargo: Query<&Cargo>,
+    items: Query<ItemState>,
+) {
     for request in deliver_requests.read() {
         let result = validate_delivery(&cargo, &items, request.actor, request.item);
         if result.is_ok() {
@@ -155,43 +172,71 @@ pub fn refresh_changed_cargo_caches(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn handle_cargo_action_results(
+pub fn spend_energy_for_successful_cargo_actions(
     timeline: Res<EnergyTimeline>,
     mut results: MessageReader<CargoActionResult>,
     mut energy: Query<&mut ActionEnergy>,
+) {
+    for event in results.read() {
+        if event.result.is_ok() {
+            if let Ok(mut energy) = energy.get_mut(event.actor) {
+                energy.spend(timeline.now, ITEM_ACTION_ENERGY_COST);
+            }
+        }
+    }
+}
+
+pub fn update_porter_jobs_from_cargo_results(
+    mut results: MessageReader<CargoActionResult>,
     mut jobs: Query<&mut AssignedJob, With<Porter>>,
-    players: Query<(), With<Player>>,
-    carried_parcels: Query<&CarriedBy, With<CargoParcel>>,
-    mut inventory_menu: ResMut<InventoryMenuState>,
     mut delivery_stats: ResMut<DeliveryStats>,
 ) {
     for event in results.read() {
-        match event.result {
-            Ok(()) => {
-                if let Ok(mut energy) = energy.get_mut(event.actor) {
-                    energy.spend(timeline.now, ITEM_ACTION_ENERGY_COST);
-                }
-                handle_successful_job_result(event, &mut jobs, &mut delivery_stats);
-                clamp_player_inventory_after_drop(
-                    event,
-                    &players,
-                    &carried_parcels,
-                    &mut inventory_menu,
-                );
-            }
-            Err(error) => {
-                if jobs.get_mut(event.actor).is_ok() {
-                    clear_failed_porter_job(event, &mut jobs);
-                }
-                tracing::debug!(
-                    actor = ?event.actor,
-                    item = ?event.item,
-                    action = ?event.action,
-                    ?error,
-                    "cargo action failed"
-                );
-            }
+        if event.result.is_ok() {
+            handle_successful_job_result(event, &mut jobs, &mut delivery_stats);
+        }
+    }
+}
+
+pub fn clear_failed_porter_cargo_jobs(
+    mut results: MessageReader<CargoActionResult>,
+    mut jobs: Query<&mut AssignedJob, With<Porter>>,
+) {
+    for event in results.read() {
+        if event.result.is_err() && jobs.get_mut(event.actor).is_ok() {
+            clear_failed_porter_job(event, &mut jobs);
+        }
+    }
+}
+
+pub fn clamp_inventory_after_cargo_drop(
+    mut results: MessageReader<CargoActionResult>,
+    players: Query<(), With<Player>>,
+    carried_parcels: Query<&CarriedBy, With<CargoParcel>>,
+    mut inventory_menu: ResMut<InventoryMenuState>,
+) {
+    for event in results.read() {
+        if event.result.is_ok() {
+            clamp_player_inventory_after_drop(
+                event,
+                &players,
+                &carried_parcels,
+                &mut inventory_menu,
+            );
+        }
+    }
+}
+
+pub fn log_failed_cargo_actions(mut results: MessageReader<CargoActionResult>) {
+    for event in results.read() {
+        if let Err(error) = event.result {
+            tracing::debug!(
+                actor = ?event.actor,
+                item = ?event.item,
+                action = ?event.action,
+                ?error,
+                "cargo action failed"
+            );
         }
     }
 }
@@ -374,10 +419,16 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems(
             (
-                resolve_cargo_requests,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
                 ApplyDeferred,
                 refresh_changed_cargo_caches,
-                handle_cargo_action_results,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
                 maintain_cargo_messages,
             )
                 .chain(),

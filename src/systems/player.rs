@@ -178,11 +178,14 @@ mod tests {
     use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
     use crate::systems::{
-        emit_player_cycle_movement_request, emit_player_wait_request, handle_cargo_action_results,
+        clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs,
+        emit_player_cycle_movement_request, emit_player_wait_request, log_failed_cargo_actions,
         maintain_cargo_messages, maintain_cycle_movement_requests, maintain_wait_requests,
-        refresh_changed_cargo_caches, resolve_cargo_requests, resolve_cycle_movement_requests,
-        resolve_wait_requests, CargoActionResult, CargoChanged, CycleMovementRequest,
-        DeliverRequest, DropRequest, PickUpRequest, WaitRequest,
+        refresh_changed_cargo_caches, resolve_cycle_movement_requests, resolve_delivery_requests,
+        resolve_drop_requests, resolve_pickup_requests, resolve_wait_requests,
+        spend_energy_for_successful_cargo_actions, update_porter_jobs_from_cargo_results,
+        CargoActionResult, CargoChanged, CycleMovementRequest, DeliverRequest, DropRequest,
+        PickUpRequest, WaitRequest,
     };
     use bevy_ecs::schedule::ApplyDeferred;
 
@@ -487,10 +490,16 @@ mod tests {
                 reset_cargo_loss_risk,
                 player_actions,
                 resolve_cargo_loss_risk,
-                resolve_cargo_requests,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
                 ApplyDeferred,
                 refresh_changed_cargo_caches,
-                handle_cargo_action_results,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
                 maintain_cargo_messages,
             )
                 .chain(),
@@ -534,10 +543,16 @@ mod tests {
         schedule.add_systems(
             (
                 resolve_cargo_loss_risk,
-                resolve_cargo_requests,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
                 ApplyDeferred,
                 refresh_changed_cargo_caches,
-                handle_cargo_action_results,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
                 maintain_cargo_messages,
             )
                 .chain(),
@@ -655,10 +670,16 @@ mod tests {
         schedule.add_systems(
             (
                 pick_up_player_parcel_from_intent,
-                resolve_cargo_requests,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
                 ApplyDeferred,
                 refresh_changed_cargo_caches,
-                handle_cargo_action_results,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
                 maintain_cargo_messages,
             )
                 .chain(),
@@ -698,10 +719,16 @@ mod tests {
         schedule.add_systems(
             (
                 pick_up_player_parcel_from_intent,
-                resolve_cargo_requests,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
                 ApplyDeferred,
                 refresh_changed_cargo_caches,
-                handle_cargo_action_results,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
                 maintain_cargo_messages,
             )
                 .chain(),
@@ -728,10 +755,16 @@ mod tests {
         schedule.add_systems(
             (
                 pick_up_player_parcel_from_intent,
-                resolve_cargo_requests,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
                 ApplyDeferred,
                 refresh_changed_cargo_caches,
-                handle_cargo_action_results,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
                 maintain_cargo_messages,
             )
                 .chain(),

@@ -7,22 +7,34 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
     let mut schedule = Schedule::default();
     schedule.add_systems(
         (
-            systems::reset_cargo_loss_risk,
-            systems::open_inventory_from_player_intent,
-            systems::emit_player_cycle_movement_request,
-            systems::resolve_cycle_movement_requests,
-            systems::maintain_cycle_movement_requests,
-            systems::pick_up_player_parcel_from_intent,
-            systems::emit_player_wait_request,
-            systems::resolve_wait_requests,
-            systems::maintain_wait_requests,
-            systems::player_actions,
-            systems::resolve_cargo_loss_risk,
-            systems::resolve_cargo_requests,
-            ApplyDeferred,
-            systems::refresh_changed_cargo_caches,
-            systems::handle_cargo_action_results,
-            systems::maintain_cargo_messages,
+            (
+                systems::reset_cargo_loss_risk,
+                systems::open_inventory_from_player_intent,
+                systems::emit_player_cycle_movement_request,
+                systems::resolve_cycle_movement_requests,
+                systems::maintain_cycle_movement_requests,
+                systems::pick_up_player_parcel_from_intent,
+                systems::emit_player_wait_request,
+                systems::resolve_wait_requests,
+                systems::maintain_wait_requests,
+                systems::player_actions,
+                systems::resolve_cargo_loss_risk,
+            )
+                .chain(),
+            (
+                systems::resolve_pickup_requests,
+                systems::resolve_drop_requests,
+                systems::resolve_delivery_requests,
+                ApplyDeferred,
+                systems::refresh_changed_cargo_caches,
+                systems::spend_energy_for_successful_cargo_actions,
+                systems::update_porter_jobs_from_cargo_results,
+                systems::clear_failed_porter_cargo_jobs,
+                systems::clamp_inventory_after_cargo_drop,
+                systems::log_failed_cargo_actions,
+                systems::maintain_cargo_messages,
+            )
+                .chain(),
         )
             .chain(),
     );
@@ -36,11 +48,20 @@ pub(crate) fn autonomous_actor_phase_schedule() -> Schedule {
             systems::update_porter_action_interest,
             systems::assign_porter_jobs,
             systems::porter_jobs,
-            systems::resolve_cargo_requests,
-            ApplyDeferred,
-            systems::refresh_changed_cargo_caches,
-            systems::handle_cargo_action_results,
-            systems::maintain_cargo_messages,
+            (
+                systems::resolve_pickup_requests,
+                systems::resolve_drop_requests,
+                systems::resolve_delivery_requests,
+                ApplyDeferred,
+                systems::refresh_changed_cargo_caches,
+                systems::spend_energy_for_successful_cargo_actions,
+                systems::update_porter_jobs_from_cargo_results,
+                systems::clear_failed_porter_cargo_jobs,
+                systems::clamp_inventory_after_cargo_drop,
+                systems::log_failed_cargo_actions,
+                systems::maintain_cargo_messages,
+            )
+                .chain(),
         )
             .chain(),
     );
@@ -53,11 +74,20 @@ pub fn menu_schedule() -> Schedule {
         (
             systems::menu_navigation,
             systems::inventory_actions,
-            systems::resolve_cargo_requests,
-            ApplyDeferred,
-            systems::refresh_changed_cargo_caches,
-            systems::handle_cargo_action_results,
-            systems::maintain_cargo_messages,
+            (
+                systems::resolve_pickup_requests,
+                systems::resolve_drop_requests,
+                systems::resolve_delivery_requests,
+                ApplyDeferred,
+                systems::refresh_changed_cargo_caches,
+                systems::spend_energy_for_successful_cargo_actions,
+                systems::update_porter_jobs_from_cargo_results,
+                systems::clear_failed_porter_cargo_jobs,
+                systems::clamp_inventory_after_cargo_drop,
+                systems::log_failed_cargo_actions,
+                systems::maintain_cargo_messages,
+            )
+                .chain(),
         )
             .chain(),
     );
