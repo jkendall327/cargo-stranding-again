@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 
 use crate::cargo::{
     derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, ContainedIn, Container,
-    ParcelState,
+    ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
@@ -12,13 +12,15 @@ use crate::resources::{Direction, EnergyTimeline};
 use crate::systems::{DeliverRequest, PickUpRequest};
 
 type ParcelCarryState<'a> = (
-    &'a ParcelState,
+    &'a ParcelDelivery,
+    Option<&'a Position>,
     Option<&'a CarriedBy>,
     Option<&'a ContainedIn>,
 );
-type AssignableParcelState<'a> = (
+type AssignableParcelDelivery<'a> = (
     Entity,
-    &'a mut ParcelState,
+    &'a mut ParcelDelivery,
+    Option<&'a Position>,
     Option<&'a CarriedBy>,
     Option<&'a ContainedIn>,
 );
@@ -28,9 +30,14 @@ pub fn update_porter_action_interest(
     parcels: Query<ParcelCarryState, With<CargoParcel>>,
     porters: Query<(Entity, &AssignedJob), With<Porter>>,
 ) {
-    let has_loose_parcel = parcels.iter().any(|(state, carried_by, contained_in)| {
-        matches!(*state, ParcelState::Loose) && carried_by.is_none() && contained_in.is_none()
-    });
+    let has_loose_parcel = parcels
+        .iter()
+        .any(|(delivery, position, carried_by, contained_in)| {
+            matches!(*delivery, ParcelDelivery::Available)
+                && position.is_some()
+                && carried_by.is_none()
+                && contained_in.is_none()
+        });
 
     for (porter_entity, job) in &porters {
         let has_active_job =
@@ -44,7 +51,7 @@ pub fn update_porter_action_interest(
 }
 
 pub fn assign_porter_jobs(
-    mut parcels: Query<AssignableParcelState, With<CargoParcel>>,
+    mut parcels: Query<AssignableParcelDelivery, With<CargoParcel>>,
     mut porters: Query<(Entity, &mut AssignedJob), With<Porter>>,
 ) {
     for (porter_entity, mut job) in &mut porters {
@@ -52,16 +59,17 @@ pub fn assign_porter_jobs(
             continue;
         }
 
-        if let Some((parcel_entity, mut state, _, _)) =
+        if let Some((parcel_entity, mut delivery, _, _, _)) =
             parcels
                 .iter_mut()
-                .find(|(_, state, carried_by, contained_in)| {
-                    matches!(**state, ParcelState::Loose)
+                .find(|(_, delivery, position, carried_by, contained_in)| {
+                    matches!(**delivery, ParcelDelivery::Available)
+                        && position.is_some()
                         && carried_by.is_none()
                         && contained_in.is_none()
                 })
         {
-            *state = ParcelState::AssignedTo(porter_entity);
+            *delivery = ParcelDelivery::ReservedBy(porter_entity);
             job.parcel = Some(parcel_entity);
             job.phase = JobPhase::GoToParcel;
         } else {
@@ -96,7 +104,7 @@ pub fn porter_jobs(world: &mut World) {
                     continue;
                 };
 
-                if parcel_state != ParcelState::AssignedTo(porter_entity) {
+                if parcel_state != ParcelDelivery::ReservedBy(porter_entity) {
                     clear_porter_job(world, porter_entity);
                     continue;
                 }
@@ -182,8 +190,8 @@ fn ready_porter_snapshot(
     })
 }
 
-fn parcel_snapshot(world: &mut World, parcel_entity: Entity) -> Option<(Position, ParcelState)> {
-    let mut query = world.query::<(&Position, &ParcelState, &CargoParcel)>();
+fn parcel_snapshot(world: &mut World, parcel_entity: Entity) -> Option<(Position, ParcelDelivery)> {
+    let mut query = world.query::<(&Position, &ParcelDelivery, &CargoParcel)>();
     let (position, state, _) = query.get(world, parcel_entity).ok()?;
     Some((*position, *state))
 }
@@ -369,7 +377,7 @@ mod tests {
                 volume: 1.0,
             },
             CargoParcel,
-            ParcelState::Loose,
+            ParcelDelivery::Available,
         ));
     }
 
@@ -392,10 +400,10 @@ mod tests {
             .count();
         assert_eq!(assigned_jobs, 2);
 
-        let mut parcel_query = world.query::<&ParcelState>();
+        let mut parcel_query = world.query::<&ParcelDelivery>();
         let reserved_parcels = parcel_query
             .iter(&world)
-            .filter(|state| matches!(state, ParcelState::AssignedTo(_)))
+            .filter(|state| matches!(state, ParcelDelivery::ReservedBy(_)))
             .count();
         assert_eq!(reserved_parcels, 2);
     }
@@ -435,10 +443,10 @@ mod tests {
         let delivery_stats = world.resource::<DeliveryStats>();
         assert_eq!(delivery_stats.delivered_parcels, 1);
 
-        let mut parcel_query = world.query::<&ParcelState>();
+        let mut parcel_query = world.query::<&ParcelDelivery>();
         let delivered_parcels = parcel_query
             .iter(&world)
-            .filter(|state| matches!(state, ParcelState::Delivered))
+            .filter(|state| matches!(state, ParcelDelivery::Delivered))
             .count();
         assert_eq!(delivered_parcels, 1);
 

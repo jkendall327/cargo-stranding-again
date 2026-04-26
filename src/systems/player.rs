@@ -5,7 +5,7 @@ mod movement;
 
 use crate::cargo::{
     derived_load, Cargo, CargoParcel, CargoStats, CargoTarget, CarriedBy, ContainedIn, Container,
-    Item, ParcelState,
+    Item, ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -30,7 +30,7 @@ type PlayerActionItem<'a> = (
     &'a mut ActionEnergy,
 );
 
-type PlayerPickupItem<'a> = (Entity, &'a Position, Option<&'a ParcelState>);
+type PlayerPickupItem<'a> = (Entity, &'a Position, Option<&'a ParcelDelivery>);
 type PlayerPickupFilter = (
     With<Item>,
     With<CargoStats>,
@@ -125,8 +125,8 @@ pub fn pick_up_player_item_from_intent(
     );
 }
 
-fn parcel_can_be_picked_up_by_player(parcel_state: Option<&ParcelState>) -> bool {
-    matches!(parcel_state, None | Some(ParcelState::Loose))
+fn parcel_can_be_picked_up_by_player(parcel_state: Option<&ParcelDelivery>) -> bool {
+    matches!(parcel_state, None | Some(ParcelDelivery::Available))
 }
 
 fn carried_container_target(
@@ -262,7 +262,7 @@ mod tests {
                 volume: 1.0,
             },
             CargoParcel,
-            ParcelState::Loose,
+            ParcelDelivery::Available,
         ));
     }
 
@@ -279,9 +279,8 @@ mod tests {
             .id()
     }
 
-    fn spawn_carried_test_parcel(world: &mut World, holder: Entity, position: Position) {
+    fn spawn_carried_test_parcel(world: &mut World, holder: Entity) {
         world.spawn((
-            position,
             Item,
             CargoStats {
                 weight: 5.0,
@@ -292,7 +291,7 @@ mod tests {
                 slot: CarrySlot::Back,
             },
             CargoParcel,
-            ParcelState::Loose,
+            ParcelDelivery::Available,
         ));
     }
 
@@ -533,7 +532,7 @@ mod tests {
             direction: Some(Direction::East),
             amount: 5.0,
         };
-        spawn_carried_test_parcel(&mut world, player, Position { x: 0, y: 0 });
+        spawn_carried_test_parcel(&mut world, player);
 
         let mut schedule = Schedule::default();
         schedule.add_systems(
@@ -567,13 +566,13 @@ mod tests {
         assert_eq!(player_position, Position { x: 6, y: 7 });
         assert_eq!(derived_load(&mut world, player_entity), 0.0);
 
-        let mut parcel_query = world.query::<(&Position, &ParcelState)>();
+        let mut parcel_query = world.query::<(&Position, &ParcelDelivery)>();
         let (parcel_position, parcel_state) = parcel_query
             .iter(&world)
-            .find(|(_, state)| **state == ParcelState::Loose)
+            .find(|(_, state)| **state == ParcelDelivery::Available)
             .expect("carried parcel should be dropped");
         assert_eq!(*parcel_position, player_position);
-        assert_eq!(*parcel_state, ParcelState::Loose);
+        assert_eq!(*parcel_state, ParcelDelivery::Available);
     }
 
     #[test]
@@ -585,7 +584,7 @@ mod tests {
         world.insert_resource(crate::resources::DeliveryStats::default());
         crate::messages::init_simulation_messages(&mut world);
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
-        spawn_carried_test_parcel(&mut world, player, Position { x: 0, y: 0 });
+        spawn_carried_test_parcel(&mut world, player);
 
         let mut schedule = Schedule::default();
         schedule.add_systems(
@@ -608,11 +607,11 @@ mod tests {
 
         assert_eq!(derived_load(&mut world, player), 0.0);
 
-        let mut parcel_query = world.query::<&ParcelState>();
+        let mut parcel_query = world.query::<&ParcelDelivery>();
         assert_eq!(
             parcel_query
                 .iter(&world)
-                .filter(|state| matches!(state, ParcelState::Loose))
+                .filter(|state| matches!(state, ParcelDelivery::Available))
                 .count(),
             1
         );
@@ -780,7 +779,7 @@ mod tests {
             Some(player)
         );
         assert!(world.get::<CargoParcel>(item).is_none());
-        assert!(world.get::<ParcelState>(item).is_none());
+        assert!(world.get::<ParcelDelivery>(item).is_none());
         assert!(world.get::<Position>(item).is_none());
         assert_eq!(derived_load(&mut world, player), 4.0);
     }
@@ -852,9 +851,9 @@ mod tests {
         assert_eq!(energy.ready_at, 0);
         assert_eq!(derived_load(&mut world, player), 0.0);
 
-        let mut parcel_query = world.query::<&ParcelState>();
+        let mut parcel_query = world.query::<&ParcelDelivery>();
         assert!(parcel_query
             .iter(&world)
-            .all(|state| matches!(state, ParcelState::Loose)));
+            .all(|state| matches!(state, ParcelDelivery::Available)));
     }
 }

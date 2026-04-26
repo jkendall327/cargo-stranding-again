@@ -212,7 +212,7 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
   - [x] `CarriedBy { holder: Entity, slot: CarrySlot }`
   - [x] `Container { volume_capacity, weight_capacity }`
   - [x] `ContainedIn { container: Entity }`
-- [ ] Rework `CargoParcel` / `ParcelState` to use the new item relationship model.
+- [x] Rework `CargoParcel` / `ParcelDelivery` to use the new item relationship model.
 - [x] Add pickup/drop systems.
   - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
   - [x] Drop a carried parcel at the player position using the temporary parcel/cargo model.
@@ -234,7 +234,7 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
 
 Notes:
 
-- `ParcelState` still mixes delivery/job state with physical looseness. Rework it so item relationships are the only source of physical location truth.
+- `ParcelDelivery` tracks delivery availability/reservation/completion only. Physical location is owned by `Position`, `CarriedBy`, and `ContainedIn`.
 - Player inventory now lists carried `CargoParcel` entities via `CarriedBy` / `ContainedIn` relationships.
 - Porter jobs now use pickup/delivery relationship transitions rather than mutating cached cargo weight.
 - This is probably the largest near-term domain change.

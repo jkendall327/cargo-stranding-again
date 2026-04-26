@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 
 use crate::cargo::{
-    Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Container, Item, ParcelState,
+    Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Container, Item, ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -123,7 +123,7 @@ pub fn init_world(world: &mut World) {
                 volume: 1.0,
             },
             CargoParcel,
-            ParcelState::Loose,
+            ParcelDelivery::Available,
         ));
     }
 

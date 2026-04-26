@@ -66,9 +66,12 @@ pub struct Cargo {
 pub struct CargoParcel;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ParcelState {
-    Loose,
-    AssignedTo(Entity),
+pub enum ParcelDelivery {
+    /// Parcel is not currently reserved for a delivery job.
+    Available,
+    /// Parcel is reserved by an actor, but its physical location is still
+    /// described only by `Position`, `CarriedBy`, or `ContainedIn`.
+    ReservedBy(Entity),
     Delivered,
 }
 
@@ -97,7 +100,7 @@ pub enum CargoError {
     MissingCargo,
     MissingItem,
     MissingContainer,
-    NotLoose,
+    NotAvailable,
     NotAtActorPosition,
     NotCarriedByHolder,
     SlotOccupied,
@@ -307,6 +310,7 @@ fn carried_containers(world: &mut World, holder: Entity) -> Vec<Entity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::Position;
 
     fn spawn_holder(world: &mut World, max_weight: f32) -> Entity {
         world.spawn((Cargo { max_weight },)).id()
@@ -321,7 +325,7 @@ mod tests {
                     volume: 1.0,
                 },
                 CargoParcel,
-                ParcelState::Loose,
+                ParcelDelivery::Available,
             ))
             .id()
     }
@@ -400,10 +404,13 @@ mod tests {
         let mut world = World::new();
         let holder = spawn_holder(&mut world, 40.0);
         let parcel = spawn_loose_parcel(&mut world, 5.0);
-        world.entity_mut(parcel).insert((CarriedBy {
-            holder,
-            slot: CarrySlot::Back,
-        },));
+        world
+            .entity_mut(parcel)
+            .insert(CarriedBy {
+                holder,
+                slot: CarrySlot::Back,
+            })
+            .remove::<Position>();
 
         let carried = carried_parcels(&mut world, holder);
         assert_eq!(
@@ -419,9 +426,9 @@ mod tests {
         );
         assert_eq!(
             *world
-                .get::<ParcelState>(parcel)
-                .expect("picked-up parcel should keep a ParcelState"),
-            ParcelState::Loose
+                .get::<ParcelDelivery>(parcel)
+                .expect("picked-up parcel should keep a ParcelDelivery"),
+            ParcelDelivery::Available
         );
         assert_eq!(derived_load(&mut world, holder), 5.0);
     }
@@ -478,10 +485,13 @@ mod tests {
         let mut world = World::new();
         let holder = spawn_holder(&mut world, 40.0);
         let parcel = spawn_loose_parcel(&mut world, 5.0);
-        world.entity_mut(parcel).insert(CarriedBy {
-            holder,
-            slot: CarrySlot::Back,
-        });
+        world
+            .entity_mut(parcel)
+            .insert(CarriedBy {
+                holder,
+                slot: CarrySlot::Back,
+            })
+            .remove::<Position>();
 
         assert_eq!(derived_load(&mut world, holder), 5.0);
     }

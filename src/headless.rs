@@ -2,7 +2,7 @@ use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
 use crate::cargo::{
-    derived_load, CargoParcel, CargoStats, CarriedBy, ContainedIn, Container, Item, ParcelState,
+    derived_load, CargoParcel, CargoStats, CarriedBy, ContainedIn, Container, Item, ParcelDelivery,
 };
 use crate::components::{
     AssignedJob, AutonomousActor, Momentum, MovementState, Player, Porter, Position, Stamina,
@@ -129,16 +129,18 @@ impl HeadlessSnapshot {
         let mut loose_parcels = 0;
         let mut assigned_parcels = 0;
         let mut carried_parcels = 0;
-        let mut parcel_query = world.query_filtered::<
-            (&ParcelState, Option<&CarriedBy>, Option<&ContainedIn>),
-            With<CargoParcel>,
-        >();
+        let mut parcel_query = world.query_filtered::<(
+            &ParcelDelivery,
+            Option<&Position>,
+            Option<&CarriedBy>,
+            Option<&ContainedIn>,
+        ), With<CargoParcel>>();
         let mut containers = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
         let carried_containers = containers
             .iter(world)
             .map(|(container, _)| container)
             .collect::<Vec<_>>();
-        for (state, carried_by, contained_in) in parcel_query.iter(world) {
+        for (delivery, position, carried_by, contained_in) in parcel_query.iter(world) {
             if carried_by.is_some()
                 || contained_in.is_some_and(|contained_in| {
                     carried_containers.contains(&contained_in.container)
@@ -147,10 +149,13 @@ impl HeadlessSnapshot {
                 carried_parcels += 1;
                 continue;
             }
-            match state {
-                ParcelState::Loose => loose_parcels += 1,
-                ParcelState::AssignedTo(_) => assigned_parcels += 1,
-                ParcelState::Delivered => {}
+            if position.is_none() {
+                continue;
+            }
+            match delivery {
+                ParcelDelivery::Available => loose_parcels += 1,
+                ParcelDelivery::ReservedBy(_) => assigned_parcels += 1,
+                ParcelDelivery::Delivered => {}
             }
         }
 
@@ -378,12 +383,12 @@ fn terrain_glyph(map: &Map, coord: TileCoord) -> char {
 }
 
 fn mark_parcels(world: &mut World, camera: Camera, rows: &mut [String]) {
-    let mut query = world.query::<(&Position, &ParcelState)>();
+    let mut query = world.query::<(&Position, &ParcelDelivery)>();
     for (position, state) in query.iter(world) {
         let glyph = match state {
-            ParcelState::Loose => '*',
-            ParcelState::AssignedTo(_) => '+',
-            ParcelState::Delivered => continue,
+            ParcelDelivery::Available => '*',
+            ParcelDelivery::ReservedBy(_) => '+',
+            ParcelDelivery::Delivered => continue,
         };
         mark_position(camera, rows, *position, glyph);
     }
@@ -440,7 +445,7 @@ fn apply_scenario_setup(world: &mut World, setup: &HeadlessScenarioSetup) {
                 volume: parcel.volume,
             },
             CargoParcel,
-            ParcelState::Loose,
+            ParcelDelivery::Available,
         ));
     }
 }

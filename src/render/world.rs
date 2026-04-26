@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
-use crate::cargo::{derived_load, CargoParcel, CargoStats, ParcelState};
+use crate::cargo::{derived_load, CargoParcel, CargoStats, ParcelDelivery};
 use crate::components::*;
 use crate::map::{Map, Terrain};
 use crate::render::layout::{
@@ -150,9 +150,12 @@ fn terrain_glyph(terrain: Terrain) -> &'static str {
 }
 
 fn draw_parcels(world: &mut World, camera: Camera) {
-    let mut query = world.query::<(&Position, &CargoStats, &ParcelState, &CargoParcel)>();
+    let mut query = world.query::<(&Position, &CargoStats, &ParcelDelivery, &CargoParcel)>();
     for (position, stats, state, _) in query.iter(world) {
-        if !matches!(state, ParcelState::Loose | ParcelState::AssignedTo(_)) {
+        if !matches!(
+            state,
+            ParcelDelivery::Available | ParcelDelivery::ReservedBy(_)
+        ) {
             continue;
         }
         if !camera.contains(*position) {
@@ -161,7 +164,7 @@ fn draw_parcels(world: &mut World, camera: Camera) {
         let (px, py) = tile_to_screen(camera, (*position).into());
         let cx = px + TILE_SIZE / 2.0;
         let cy = py + TILE_SIZE / 2.0;
-        let color = if matches!(state, ParcelState::AssignedTo(_)) {
+        let color = if matches!(state, ParcelDelivery::ReservedBy(_)) {
             Color::from_rgba(252, 204, 84, 255)
         } else {
             Color::from_rgba(224, 154, 72, 255)

@@ -6,7 +6,7 @@ use bevy_ecs::system::SystemParam;
 use crate::cargo::{
     actor_loads_from_relationships, container_loads_from_relationships, Cargo, CargoError,
     CargoParcel, CargoStats, CargoTarget, CarriedBy, CarrySlot, ContainedIn, ContainedLoad,
-    Container, ContainerLoad, DirectCarryLoad, Item, ParcelState,
+    Container, ContainerLoad, DirectCarryLoad, Item, ParcelDelivery,
 };
 use crate::components::{ActionEnergy, AssignedJob, JobPhase, Player, Porter, Position};
 use crate::energy::ITEM_ACTION_ENERGY_COST;
@@ -57,7 +57,7 @@ type ItemState<'a> = (
     Option<&'a CargoStats>,
     Option<&'a CarriedBy>,
     Option<&'a ContainedIn>,
-    Option<&'a ParcelState>,
+    Option<&'a ParcelDelivery>,
 );
 
 #[derive(SystemParam)]
@@ -94,6 +94,10 @@ pub fn resolve_pickup_requests(
     for request in pickup_requests.read() {
         let result = validate_pickup(&queries, &scratch, request);
         if result.is_ok() {
+            debug_assert!(
+                queries.positions.get(request.item).is_ok(),
+                "pickup item should start as a positioned loose item"
+            );
             match request.target {
                 CargoTarget::Slot(slot) => {
                     commands
@@ -140,11 +144,16 @@ pub fn resolve_drop_requests(
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
     items: Query<ItemState>,
+    positions: Query<&Position>,
     containers: Query<&CarriedBy, With<Container>>,
 ) {
     for request in drop_requests.read() {
         let result = validate_drop(&cargo, &items, &containers, request.actor, request.item);
         if result.is_ok() {
+            debug_assert!(
+                positions.get(request.item).is_err(),
+                "dropped item should not already have a world position"
+            );
             commands
                 .entity(request.item)
                 .remove::<CarriedBy>()
@@ -167,16 +176,21 @@ pub fn resolve_delivery_requests(
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
     items: Query<ItemState>,
+    positions: Query<&Position>,
     containers: Query<&CarriedBy, With<Container>>,
 ) {
     for request in deliver_requests.read() {
         let result = validate_delivery(&cargo, &items, &containers, request.actor, request.item);
         if result.is_ok() {
+            debug_assert!(
+                positions.get(request.item).is_err(),
+                "delivered item should be carried or contained, not positioned loose"
+            );
             commands
                 .entity(request.item)
                 .remove::<CarriedBy>()
                 .remove::<ContainedIn>()
-                .insert(ParcelState::Delivered);
+                .insert(ParcelDelivery::Delivered);
         }
         results.write(CargoActionResult {
             actor: request.actor,
@@ -278,7 +292,7 @@ fn validate_pickup(
         || contained_in.is_some()
         || !parcel_can_be_picked_up_by(parcel_state, request.actor)
     {
-        return Err(CargoError::NotLoose);
+        return Err(CargoError::NotAvailable);
     }
 
     let actor_position = queries
@@ -386,12 +400,12 @@ fn validate_delivery(
     Err(CargoError::NotCarriedByHolder)
 }
 
-fn parcel_can_be_picked_up_by(parcel_state: Option<&ParcelState>, actor: Entity) -> bool {
+fn parcel_can_be_picked_up_by(parcel_state: Option<&ParcelDelivery>, actor: Entity) -> bool {
     match parcel_state {
         None => true,
-        Some(ParcelState::Loose) => true,
-        Some(ParcelState::AssignedTo(assigned_actor)) => *assigned_actor == actor,
-        Some(ParcelState::Delivered) => false,
+        Some(ParcelDelivery::Available) => true,
+        Some(ParcelDelivery::ReservedBy(assigned_actor)) => *assigned_actor == actor,
+        Some(ParcelDelivery::Delivered) => false,
     }
 }
 
@@ -572,7 +586,7 @@ mod tests {
                     volume: 1.0,
                 },
                 CargoParcel,
-                ParcelState::Loose,
+                ParcelDelivery::Available,
             ))
             .id()
     }
@@ -636,8 +650,8 @@ mod tests {
             Some(actor)
         );
         assert_eq!(
-            world.get::<ParcelState>(parcel).copied(),
-            Some(ParcelState::Loose)
+            world.get::<ParcelDelivery>(parcel).copied(),
+            Some(ParcelDelivery::Available)
         );
         assert!(world.get::<Position>(parcel).is_none());
         assert_eq!(derived_load(&mut world, actor), 5.0);
@@ -670,7 +684,7 @@ mod tests {
             world.get::<CarriedBy>(item).map(|carried| carried.holder),
             Some(actor)
         );
-        assert!(world.get::<ParcelState>(item).is_none());
+        assert!(world.get::<ParcelDelivery>(item).is_none());
         assert!(world.get::<Position>(item).is_none());
         assert_eq!(derived_load(&mut world, actor), 3.0);
 
@@ -689,7 +703,7 @@ mod tests {
             world.get::<Position>(item).copied(),
             Some(Position { x: 4, y: 5 })
         );
-        assert!(world.get::<ParcelState>(item).is_none());
+        assert!(world.get::<ParcelDelivery>(item).is_none());
         assert_eq!(derived_load(&mut world, actor), 0.0);
     }
 
@@ -711,8 +725,8 @@ mod tests {
 
         assert!(world.get::<CarriedBy>(parcel).is_none());
         assert_eq!(
-            world.get::<ParcelState>(parcel).copied(),
-            Some(ParcelState::Loose)
+            world.get::<ParcelDelivery>(parcel).copied(),
+            Some(ParcelDelivery::Available)
         );
         assert_eq!(derived_load(&mut world, actor), 0.0);
         assert_eq!(
@@ -761,10 +775,13 @@ mod tests {
         init_cargo_resources(&mut world);
         let actor = spawn_actor(&mut world, 40.0);
         let carried = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        world.entity_mut(carried).insert((CarriedBy {
-            holder: actor,
-            slot: CarrySlot::Back,
-        },));
+        world
+            .entity_mut(carried)
+            .insert(CarriedBy {
+                holder: actor,
+                slot: CarrySlot::Back,
+            })
+            .remove::<Position>();
         let waiting = spawn_loose_parcel(&mut world, Position { x: 2, y: 1 }, 5.0);
         world
             .resource_mut::<Messages<PickUpRequest>>()
@@ -778,8 +795,8 @@ mod tests {
 
         assert!(world.get::<CarriedBy>(waiting).is_none());
         assert_eq!(
-            world.get::<ParcelState>(waiting).copied(),
-            Some(ParcelState::Loose)
+            world.get::<ParcelDelivery>(waiting).copied(),
+            Some(ParcelDelivery::Available)
         );
         assert_eq!(derived_load(&mut world, actor), 5.0);
         assert_eq!(
@@ -875,8 +892,8 @@ mod tests {
 
         assert!(world.get::<ContainedIn>(parcel).is_none());
         assert_eq!(
-            world.get::<ParcelState>(parcel).copied(),
-            Some(ParcelState::Loose)
+            world.get::<ParcelDelivery>(parcel).copied(),
+            Some(ParcelDelivery::Available)
         );
         assert_eq!(
             world
@@ -893,10 +910,13 @@ mod tests {
         init_cargo_resources(&mut world);
         let actor = spawn_actor(&mut world, 40.0);
         let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        world.entity_mut(parcel).insert((CarriedBy {
-            holder: actor,
-            slot: CarrySlot::Back,
-        },));
+        world
+            .entity_mut(parcel)
+            .insert(CarriedBy {
+                holder: actor,
+                slot: CarrySlot::Back,
+            })
+            .remove::<Position>();
         world
             .resource_mut::<Messages<DropRequest>>()
             .write(DropRequest {
@@ -913,8 +933,8 @@ mod tests {
             Some(Position { x: 2, y: 3 })
         );
         assert_eq!(
-            world.get::<ParcelState>(parcel).copied(),
-            Some(ParcelState::Loose)
+            world.get::<ParcelDelivery>(parcel).copied(),
+            Some(ParcelDelivery::Available)
         );
         assert_eq!(derived_load(&mut world, actor), 0.0);
         assert_eq!(
@@ -946,10 +966,13 @@ mod tests {
             phase: JobPhase::GoToDepot,
             parcel: Some(parcel),
         });
-        world.entity_mut(parcel).insert((CarriedBy {
-            holder: actor,
-            slot: CarrySlot::Back,
-        },));
+        world
+            .entity_mut(parcel)
+            .insert(CarriedBy {
+                holder: actor,
+                slot: CarrySlot::Back,
+            })
+            .remove::<Position>();
         world
             .resource_mut::<Messages<DeliverRequest>>()
             .write(DeliverRequest {
@@ -961,8 +984,8 @@ mod tests {
 
         assert!(world.get::<CarriedBy>(parcel).is_none());
         assert_eq!(
-            world.get::<ParcelState>(parcel).copied(),
-            Some(ParcelState::Delivered)
+            world.get::<ParcelDelivery>(parcel).copied(),
+            Some(ParcelDelivery::Delivered)
         );
         assert_eq!(derived_load(&mut world, actor), 0.0);
         assert_eq!(

@@ -61,7 +61,7 @@ pub fn menu_navigation(world: &mut World) {
 mod tests {
     use super::*;
     use crate::cargo::{
-        derived_load, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelState,
+        derived_load, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelDelivery,
     };
     use crate::components::{ActionEnergy, Player, Position};
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
@@ -85,10 +85,9 @@ mod tests {
             .id()
     }
 
-    fn spawn_carried_parcel(world: &mut World, holder: Entity, position: Position) -> Entity {
+    fn spawn_carried_parcel(world: &mut World, holder: Entity) -> Entity {
         world
             .spawn((
-                position,
                 Item,
                 CargoStats {
                     weight: 5.0,
@@ -99,7 +98,7 @@ mod tests {
                     slot: CarrySlot::Back,
                 },
                 CargoParcel,
-                ParcelState::Loose,
+                ParcelDelivery::Available,
             ))
             .id()
     }
@@ -230,8 +229,8 @@ mod tests {
             MenuAction::MoveSelectionDown,
         );
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 });
-        spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
-        spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
+        spawn_carried_parcel(&mut world, player);
+        spawn_carried_parcel(&mut world, player);
 
         let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
@@ -249,7 +248,7 @@ mod tests {
         world.insert_resource(SimulationClock { turn: 0 });
         world.insert_resource(PlayerIntent::default());
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 });
-        let parcel = spawn_carried_parcel(&mut world, player, Position { x: 0, y: 0 });
+        let parcel = spawn_carried_parcel(&mut world, player);
 
         let mut schedule = menu_with_inventory_resolution_schedule();
         let mut simulation = SimulationRunner::new();
@@ -257,9 +256,9 @@ mod tests {
 
         assert_eq!(
             *world
-                .get::<ParcelState>(parcel)
+                .get::<ParcelDelivery>(parcel)
                 .expect("test parcel should still exist"),
-            ParcelState::Loose
+            ParcelDelivery::Available
         );
         assert_eq!(
             *world
