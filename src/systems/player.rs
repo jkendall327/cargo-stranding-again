@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 mod cargo;
 mod movement;
 
-use crate::cargo::{self as cargo_model, Cargo, CarrySlot, ParcelState};
+use crate::cargo::{Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelState};
 use crate::components::*;
 use crate::energy::{ActionEnergy, ITEM_ACTION_ENERGY_COST, WAIT_ENERGY_COST};
 use crate::map::Map;
@@ -29,6 +29,37 @@ type PlayerActionItem<'a> = (
 
 const WAIT_STAMINA_RECOVERY: f32 = 3.0;
 
+type PlayerPickupItem<'a> = (Entity, &'a Position, &'a CargoStats, &'a mut ParcelState);
+type PlayerPickupFilter = (With<Item>, With<CargoParcel>, Without<CarriedBy>);
+
+pub fn open_inventory_from_player_intent(
+    intent: Res<PlayerIntent>,
+    timeline: Res<EnergyTimeline>,
+    mut screen: ResMut<GameScreen>,
+    mut inventory_menu: ResMut<InventoryMenuState>,
+    player_query: Query<(Entity, &ActionEnergy), With<Player>>,
+    carried_parcels: Query<&CarriedBy, With<CargoParcel>>,
+) {
+    let Some(PlayerAction::OpenInventory) = intent.action else {
+        return;
+    };
+
+    let Ok((player_entity, energy)) = player_query.single() else {
+        return;
+    };
+    if !energy.is_ready(timeline.now) {
+        return;
+    }
+
+    let carried_count = carried_parcels
+        .iter()
+        .filter(|carried_by| carried_by.holder == player_entity)
+        .count();
+    inventory_menu.clamp_to_item_count(carried_count);
+    *screen = GameScreen::InventoryMenu;
+    tracing::debug!(carried_count, "opened inventory");
+}
+
 pub fn cycle_player_movement_mode(
     intent: Res<PlayerIntent>,
     timeline: Res<EnergyTimeline>,
@@ -52,34 +83,88 @@ pub fn cycle_player_movement_mode(
     );
 }
 
+pub fn pick_up_player_parcel_from_intent(
+    mut commands: Commands,
+    intent: Res<PlayerIntent>,
+    timeline: Res<EnergyTimeline>,
+    mut player_query: Query<
+        (
+            Entity,
+            &Position,
+            &mut Velocity,
+            &mut Cargo,
+            &mut ActionEnergy,
+        ),
+        With<Player>,
+    >,
+    mut parcels: Query<PlayerPickupItem, PlayerPickupFilter>,
+) {
+    let Some(PlayerAction::PickUp) = intent.action else {
+        return;
+    };
+
+    let Ok((player_entity, player_position, mut velocity, mut cargo, mut energy)) =
+        player_query.single_mut()
+    else {
+        return;
+    };
+    if !energy.is_ready(timeline.now) {
+        return;
+    }
+
+    velocity.dx = 0;
+    velocity.dy = 0;
+
+    let Some((parcel_entity, _, cargo_stats, mut parcel_state)) =
+        parcels.iter_mut().find(|(_, position, _, state)| {
+            **position == *player_position && matches!(**state, ParcelState::Loose)
+        })
+    else {
+        tracing::debug!(
+            x = player_position.x,
+            y = player_position.y,
+            "player pickup found no parcel"
+        );
+        return;
+    };
+
+    if cargo.current_weight + cargo_stats.weight > cargo.max_weight {
+        tracing::debug!(
+            x = player_position.x,
+            y = player_position.y,
+            item_weight = cargo_stats.weight,
+            cargo = cargo.current_weight,
+            max_cargo = cargo.max_weight,
+            "player pickup failed"
+        );
+        return;
+    }
+
+    commands.entity(parcel_entity).insert(CarriedBy {
+        holder: player_entity,
+        slot: CarrySlot::Back,
+    });
+    *parcel_state = ParcelState::CarriedBy(player_entity);
+    cargo.current_weight += cargo_stats.weight;
+    energy.spend(timeline.now, ITEM_ACTION_ENERGY_COST);
+    tracing::info!(
+        x = player_position.x,
+        y = player_position.y,
+        cargo = cargo.current_weight,
+        "player picked up parcel"
+    );
+}
+
 pub fn player_actions(world: &mut World) {
     let now = world.resource::<EnergyTimeline>().now;
     let Some(action) = world.resource::<PlayerIntent>().action else {
         return;
     };
 
-    if action == PlayerAction::OpenInventory {
-        let Some(entity) = ready_player_entity(world, now) else {
-            return;
-        };
-        let carried_count = cargo_model::carried_parcel_count(world, entity);
-        world
-            .resource_mut::<InventoryMenuState>()
-            .clamp_to_item_count(carried_count);
-        *world.resource_mut::<GameScreen>() = GameScreen::InventoryMenu;
-        tracing::debug!(carried_count, "opened inventory");
-        return;
-    }
-
-    if action == PlayerAction::PickUp {
-        let Some((entity, position)) = ready_player_position_and_clear_velocity(world, now) else {
-            return;
-        };
-        pick_up_player_parcel(world, entity, position, now);
-        return;
-    }
-
-    if action == PlayerAction::CycleMovementMode {
+    if matches!(
+        action,
+        PlayerAction::OpenInventory | PlayerAction::PickUp | PlayerAction::CycleMovementMode
+    ) {
         return;
     }
 
@@ -151,72 +236,10 @@ pub fn player_actions(world: &mut World) {
     }
 }
 
-fn ready_player_entity(world: &mut World, now: u64) -> Option<Entity> {
-    let mut player_query = world.query_filtered::<(Entity, &ActionEnergy), With<Player>>();
-    let (entity, energy) = player_query.iter(world).next()?;
-    energy.is_ready(now).then_some(entity)
-}
-
-fn ready_player_position_and_clear_velocity(
-    world: &mut World,
-    now: u64,
-) -> Option<(Entity, Position)> {
-    let mut player_query =
-        world.query_filtered::<(Entity, &Position, &mut Velocity, &ActionEnergy), With<Player>>();
-    let (entity, position, mut velocity, energy) = player_query.iter_mut(world).next()?;
-    if !energy.is_ready(now) {
-        return None;
-    }
-    velocity.dx = 0;
-    velocity.dy = 0;
-    Some((entity, *position))
-}
-
-fn pick_up_player_parcel(world: &mut World, holder: Entity, holder_position: Position, now: u64) {
-    let parcel = {
-        let mut parcels = world.query::<(Entity, &Position, &ParcelState)>();
-        parcels
-            .iter(world)
-            .find(|(_, position, state)| {
-                **position == holder_position && **state == ParcelState::Loose
-            })
-            .map(|(entity, _, _)| entity)
-    };
-
-    let Some(parcel) = parcel else {
-        tracing::debug!(
-            x = holder_position.x,
-            y = holder_position.y,
-            "player pickup found no parcel"
-        );
-        return;
-    };
-
-    if cargo_model::pick_up_item(world, holder, parcel, CarrySlot::Back).is_err() {
-        tracing::debug!(
-            x = holder_position.x,
-            y = holder_position.y,
-            "player pickup failed"
-        );
-        return;
-    }
-
-    let Some(mut energy) = world.get_mut::<ActionEnergy>(holder) else {
-        return;
-    };
-    energy.spend(now, ITEM_ACTION_ENERGY_COST);
-    let cargo_weight = cargo_model::cargo_load(world, holder).unwrap_or(0.0);
-    tracing::info!(
-        x = holder_position.x,
-        y = holder_position.y,
-        cargo = cargo_weight,
-        "player picked up parcel"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cargo as cargo_model;
     use crate::cargo::{CargoParcel, CargoStats, CarriedBy, Item};
     use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
@@ -606,7 +629,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(open_inventory_from_player_intent);
         schedule.run(&mut world);
 
         assert_eq!(*world.resource::<GameScreen>(), GameScreen::InventoryMenu);
@@ -628,7 +651,7 @@ mod tests {
         spawn_test_parcel(&mut world, Position { x: 2, y: 2 });
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(pick_up_player_parcel_from_intent);
         schedule.run(&mut world);
 
         let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
@@ -661,7 +684,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(pick_up_player_parcel_from_intent);
         schedule.run(&mut world);
 
         let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
@@ -681,7 +704,7 @@ mod tests {
         spawn_test_parcel_with_weight(&mut world, Position { x: 2, y: 2 }, 45.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(pick_up_player_parcel_from_intent);
         schedule.run(&mut world);
 
         let energy = world

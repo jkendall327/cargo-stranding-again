@@ -7,7 +7,9 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
     schedule.add_systems(
         (
             systems::reset_cargo_loss_risk,
+            systems::open_inventory_from_player_intent,
             systems::cycle_player_movement_mode,
+            systems::pick_up_player_parcel_from_intent,
             systems::player_actions,
             systems::resolve_cargo_loss_risk,
         )
