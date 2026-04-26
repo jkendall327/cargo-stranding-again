@@ -1,9 +1,8 @@
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
-use crate::components::{
-    Cargo, CargoParcel, Momentum, MovementState, ParcelState, Player, Porter, Position, Stamina,
-};
+use crate::cargo::{Cargo, CargoParcel, ParcelState};
+use crate::components::{Momentum, MovementState, Player, Porter, Position, Stamina};
 use crate::map::{Map, TileCoord};
 use crate::resources::{
     Camera, DeliveryStats, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent,

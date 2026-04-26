@@ -60,7 +60,8 @@ pub fn menu_navigation(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::components::{ActionEnergy, Cargo, CargoParcel, ParcelState, Player, Position};
+    use crate::cargo::{Cargo, CargoParcel, ParcelState};
+    use crate::components::{ActionEnergy, Player, Position};
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
     use crate::simulation::SimulationRunner;
     use crate::systems::inventory::inventory_actions;

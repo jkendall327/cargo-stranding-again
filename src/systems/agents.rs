@@ -1,5 +1,6 @@
 use bevy_ecs::prelude::*;
 
+use crate::cargo::{Cargo, CargoParcel, ParcelState};
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, ITEM_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};

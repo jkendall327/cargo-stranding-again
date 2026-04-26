@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
+use crate::cargo::{Cargo, CargoParcel, ParcelState};
 use crate::components::*;
 use crate::map::{Map, Terrain};
 use crate::render::layout::{

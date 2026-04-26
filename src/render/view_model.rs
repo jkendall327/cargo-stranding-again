@@ -1,8 +1,9 @@
 use bevy_ecs::prelude::*;
 
 use crate::cargo::player_carried_parcels;
+use crate::cargo::Cargo;
 use crate::components::{
-    AssignedJob, Cargo, JobPhase, Momentum, MovementState, Player, Porter, Position, Stamina,
+    AssignedJob, JobPhase, Momentum, MovementState, Player, Porter, Position, Stamina,
 };
 use crate::energy::ActionEnergy;
 use crate::map::{Map, TileCoord};

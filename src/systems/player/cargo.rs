@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{Cargo, CargoParcel, ParcelState, Player, Position};
+use crate::cargo::{Cargo, CargoParcel, ParcelState};
+use crate::components::{Player, Position};
 use crate::resources::CargoLossRisk;
 
 type SpilledParcelItem<'a> = (&'a mut Position, &'a mut ParcelState);

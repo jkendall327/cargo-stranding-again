@@ -4,6 +4,7 @@ use bevy_ecs::system::SystemParam;
 mod cargo;
 mod movement;
 
+use crate::cargo::{Cargo, CargoParcel, ParcelState};
 use crate::components::*;
 use crate::energy::{ActionEnergy, ITEM_ACTION_ENERGY_COST, WAIT_ENERGY_COST};
 use crate::map::Map;

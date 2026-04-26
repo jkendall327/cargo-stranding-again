@@ -53,12 +53,6 @@ pub struct Porter {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct Cargo {
-    pub current_weight: f32,
-    pub max_weight: f32,
-}
-
-#[derive(Component, Clone, Copy, Debug)]
 pub struct Stamina {
     pub current: f32,
     pub max: f32,
@@ -109,19 +103,6 @@ impl MovementState {
             MovementMode::Steady => MovementMode::Walking,
         };
     }
-}
-
-#[derive(Component, Clone, Copy, Debug)]
-pub struct CargoParcel {
-    pub weight: f32,
-}
-
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ParcelState {
-    Loose,
-    AssignedTo(Entity),
-    CarriedBy(Entity),
-    Delivered,
 }
 
 #[derive(Component, Clone, Copy, Debug)]

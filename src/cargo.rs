@@ -1,6 +1,25 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{Cargo, CargoParcel, ParcelState, Player, Position};
+use crate::components::{Player, Position};
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Cargo {
+    pub current_weight: f32,
+    pub max_weight: f32,
+}
+
+#[derive(Component, Clone, Copy, Debug)]
+pub struct CargoParcel {
+    pub weight: f32,
+}
+
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParcelState {
+    Loose,
+    AssignedTo(Entity),
+    CarriedBy(Entity),
+    Delivered,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CarriedParcelEntry {

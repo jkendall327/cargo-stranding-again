@@ -1,6 +1,7 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{Cargo, Momentum, MovementState, Position, Stamina, Velocity};
+use crate::cargo::Cargo;
+use crate::components::{Momentum, MovementState, Position, Stamina, Velocity};
 use crate::energy::ActionEnergy;
 use crate::map::Map;
 use crate::momentum::movement_effect;
