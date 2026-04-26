@@ -1,11 +1,13 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
-use crate::cargo::{derived_load, CargoParcel, CargoStats, ParcelDelivery};
 use crate::components::*;
 use crate::map::{Map, Terrain};
 use crate::render::layout::{
     tile_to_screen, viewport_height, viewport_width, VIEWPORT_X, VIEWPORT_Y,
+};
+use crate::render::view_model::{
+    ActorCargoRender, CargoHolderKind, LooseCargoRender, LooseCargoState,
 };
 use crate::render::TILE_SIZE;
 use crate::resources::Camera;
@@ -36,9 +38,11 @@ pub(super) fn draw_world(world: &mut World, camera: Camera) {
         draw_map(map, camera);
     }
 
-    draw_parcels(world, camera);
-    draw_porters(world, camera);
-    draw_player(world, camera);
+    let loose_cargo = LooseCargoRender::all_from_world(world);
+    let actor_cargo = ActorCargoRender::all_from_world(world);
+    draw_loose_cargo(&loose_cargo, camera);
+    draw_porters(world, camera, &actor_cargo);
+    draw_player(world, camera, &actor_cargo);
     draw_viewport_frame(camera);
 }
 
@@ -149,38 +153,40 @@ fn terrain_glyph(terrain: Terrain) -> &'static str {
     }
 }
 
-fn draw_parcels(world: &mut World, camera: Camera) {
-    let mut query = world.query::<(&Position, &CargoStats, &ParcelDelivery, &CargoParcel)>();
-    for (position, stats, state, _) in query.iter(world) {
-        if !matches!(
-            state,
-            ParcelDelivery::Available | ParcelDelivery::ReservedBy(_)
-        ) {
+fn draw_loose_cargo(cargo: &[LooseCargoRender], camera: Camera) {
+    for item in cargo {
+        if !camera.contains(item.position) {
             continue;
         }
-        if !camera.contains(*position) {
-            continue;
-        }
-        let (px, py) = tile_to_screen(camera, (*position).into());
+        let (px, py) = tile_to_screen(camera, item.position.into());
         let cx = px + TILE_SIZE / 2.0;
         let cy = py + TILE_SIZE / 2.0;
-        let color = if matches!(state, ParcelDelivery::ReservedBy(_)) {
-            Color::from_rgba(252, 204, 84, 255)
-        } else {
-            Color::from_rgba(224, 154, 72, 255)
+        let (color, outline, label) = match item.state {
+            LooseCargoState::Available => (Color::from_rgba(224, 154, 72, 255), None, None),
+            LooseCargoState::Reserved { porter_id } => (
+                Color::from_rgba(252, 204, 84, 255),
+                Some(Color::from_rgba(255, 244, 176, 255)),
+                porter_id.map(|id| format!("P{}", id)),
+            ),
         };
         draw_rectangle(cx - 5.0, cy - 5.0, 10.0, 10.0, color);
+        if let Some(outline) = outline {
+            draw_rectangle_lines(cx - 6.5, cy - 6.5, 13.0, 13.0, 2.0, outline);
+        }
         draw_text(
-            &format!("{:.0}", stats.weight),
+            &format!("{:.0}", item.weight),
             cx - 4.0,
             cy + 4.0,
             10.0,
             BLACK,
         );
+        if let Some(label) = label {
+            draw_text(&label, px + 1.0, py - 1.0, 10.0, WHITE);
+        }
     }
 }
 
-fn draw_porters(world: &mut World, camera: Camera) {
+fn draw_porters(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRender]) {
     let mut query = world.query::<(Entity, &Position, &Porter, &AssignedJob)>();
     let porters = query
         .iter(world)
@@ -190,8 +196,12 @@ fn draw_porters(world: &mut World, camera: Camera) {
         if !camera.contains(position) {
             continue;
         }
+        let carried = actor_cargo
+            .iter()
+            .find(|cargo| cargo.holder == entity)
+            .filter(|cargo| matches!(cargo.holder_kind, CargoHolderKind::Porter(_)));
         let (px, py) = tile_to_screen(camera, position.into());
-        let color = if derived_load(world, entity) > 0.0 {
+        let color = if carried.is_some_and(|cargo| cargo.total_weight > 0.0) {
             Color::from_rgba(238, 196, 99, 255)
         } else {
             Color::from_rgba(80, 210, 170, 255)
@@ -210,10 +220,13 @@ fn draw_porters(world: &mut World, camera: Camera) {
             JobPhase::Done => "!",
         };
         draw_text(label, px + 10.0, py + 7.0, 10.0, WHITE);
+        if let Some(cargo) = carried {
+            draw_actor_cargo_badge(px, py, cargo);
+        }
     }
 }
 
-fn draw_player(world: &mut World, camera: Camera) {
+fn draw_player(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRender]) {
     let mut query = world
         .query_filtered::<(Entity, &Position, &Stamina, &MovementState, &Momentum), With<Player>>();
     let Some((entity, position, stamina, movement_state, _momentum)) = query.iter(world).next()
@@ -264,12 +277,27 @@ fn draw_player(world: &mut World, camera: Camera) {
         Color::from_rgba(90, 220, 130, 255),
     );
 
-    if derived_load(world, entity) > 0.0 {
-        draw_circle(
-            px + 13.0,
-            py + 4.0,
-            3.0,
-            Color::from_rgba(224, 154, 72, 255),
-        );
+    if let Some(cargo) = actor_cargo
+        .iter()
+        .find(|cargo| cargo.holder == entity)
+        .filter(|cargo| matches!(cargo.holder_kind, CargoHolderKind::Player))
+    {
+        draw_actor_cargo_badge(px, py, cargo);
     }
+}
+
+fn draw_actor_cargo_badge(px: f32, py: f32, cargo: &ActorCargoRender) {
+    let badge_color = if cargo.has_contained_items {
+        Color::from_rgba(116, 205, 239, 255)
+    } else {
+        Color::from_rgba(224, 154, 72, 255)
+    };
+    let label = if cargo.parcel_count > 0 {
+        cargo.parcel_count.to_string()
+    } else {
+        format!("{:.0}", cargo.total_weight)
+    };
+    draw_circle(px + 13.0, py + 4.0, 5.0, Color::from_rgba(12, 14, 16, 235));
+    draw_circle(px + 13.0, py + 4.0, 3.8, badge_color);
+    draw_text(&label, px + 10.0, py + 7.0, 8.0, BLACK);
 }

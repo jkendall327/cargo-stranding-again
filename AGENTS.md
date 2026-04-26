@@ -31,6 +31,8 @@ I want to stay somewhat familiar with the code. To that end, leave *some* doc co
 You don't need to go crazy with it; I don't care about having line-by-line logic explained.
 I care more about the 'why' of it all.
 
+Tests are great, obviously, but I'm also OK with some debug_asserts to catch any sneaky invariant failures. Throw in a few if you think they are high ROI.
+
 ## Headless Harness
 
 The headless harness provides automated feedback on gameplay or simulation changes without opening a Macroquad window.

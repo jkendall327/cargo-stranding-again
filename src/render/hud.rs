@@ -16,11 +16,12 @@ const CONTROL_HINTS: [&str; 9] = [
     "Water blocks movement",
     "Sprint is fast; steady saves stamina",
 ];
-const LEGEND_LINES: [&str; 4] = [
+const LEGEND_LINES: [&str; 5] = [
     "@ player",
     "Green/Gold circles: porters",
-    "Orange boxes: loose cargo",
-    "D: depot",
+    "Orange boxes: available cargo",
+    "Yellow outlined boxes: reserved cargo",
+    "Small badges: carried cargo",
 ];
 
 pub(super) fn draw_ui(world: &mut World, camera: Camera) {
