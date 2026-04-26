@@ -9,6 +9,10 @@ fn main() -> ExitCode {
             ("format", &["fmt", "--check"][..]),
             ("clippy", &["clippy", "--all-targets"][..]),
             ("tests", &["test"][..]),
+            (
+                "headless scenarios",
+                &["run", "--bin", "headless", "--", "all"][..],
+            ),
         ]),
         Some(command) => {
             eprintln!("unknown xtask command: {command}");
