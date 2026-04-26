@@ -20,7 +20,7 @@ pub use movement_mode::{
     emit_player_cycle_movement_request, resolve_cycle_movement_requests, CycleMovementRequest,
 };
 pub use player::{
-    open_inventory_from_player_intent, pick_up_player_parcel_from_intent, player_actions,
+    open_inventory_from_player_intent, pick_up_player_item_from_intent, player_actions,
     reset_cargo_loss_risk, resolve_cargo_loss_risk,
 };
 pub use wait::{emit_player_wait_request, resolve_wait_requests, WaitRequest};

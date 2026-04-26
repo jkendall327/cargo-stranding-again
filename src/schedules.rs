@@ -12,7 +12,7 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
                 systems::open_inventory_from_player_intent,
                 systems::emit_player_cycle_movement_request,
                 systems::resolve_cycle_movement_requests,
-                systems::pick_up_player_parcel_from_intent,
+                systems::pick_up_player_item_from_intent,
                 systems::emit_player_wait_request,
                 systems::resolve_wait_requests,
                 systems::player_actions,

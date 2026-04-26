@@ -4,8 +4,8 @@ mod cargo;
 mod movement;
 
 use crate::cargo::{
-    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, ContainedIn, Container, Item,
-    ParcelState,
+    derived_load, Cargo, CargoParcel, CargoStats, CargoTarget, CarriedBy, ContainedIn, Container,
+    Item, ParcelState,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -30,10 +30,10 @@ type PlayerActionItem<'a> = (
     &'a mut ActionEnergy,
 );
 
-type PlayerPickupItem<'a> = (Entity, &'a Position, &'a ParcelState);
+type PlayerPickupItem<'a> = (Entity, &'a Position, Option<&'a ParcelState>);
 type PlayerPickupFilter = (
     With<Item>,
-    With<CargoParcel>,
+    With<CargoStats>,
     Without<CarriedBy>,
     Without<ContainedIn>,
 );
@@ -81,11 +81,11 @@ fn parcel_carried_by_actor(
         })
 }
 
-pub fn pick_up_player_parcel_from_intent(
+pub fn pick_up_player_item_from_intent(
     intent: Res<PlayerIntent>,
     timeline: Res<EnergyTimeline>,
     player: Single<(Entity, &Position, &mut Velocity, &ActionEnergy), With<Player>>,
-    parcels: Query<PlayerPickupItem, PlayerPickupFilter>,
+    items: Query<PlayerPickupItem, PlayerPickupFilter>,
     containers: Query<(Entity, &CarriedBy), With<Container>>,
     mut pickup_requests: MessageWriter<PickUpRequest>,
 ) {
@@ -101,28 +101,32 @@ pub fn pick_up_player_parcel_from_intent(
     velocity.dx = 0;
     velocity.dy = 0;
 
-    let Some((parcel_entity, _, _)) = parcels.iter().find(|(_, position, state)| {
-        **position == *player_position && matches!(**state, ParcelState::Loose)
+    let Some((item_entity, _, _)) = items.iter().find(|(_, position, parcel_state)| {
+        **position == *player_position && parcel_can_be_picked_up_by_player(*parcel_state)
     }) else {
         tracing::debug!(
             x = player_position.x,
             y = player_position.y,
-            "player pickup found no parcel"
+            "player pickup found no loose cargo"
         );
         return;
     };
 
     pickup_requests.write(PickUpRequest {
         actor: player_entity,
-        item: parcel_entity,
+        item: item_entity,
         target: carried_container_target(player_entity, &containers),
     });
     tracing::debug!(
         x = player_position.x,
         y = player_position.y,
-        item = ?parcel_entity,
+        item = ?item_entity,
         "player pickup requested"
     );
+}
+
+fn parcel_can_be_picked_up_by_player(parcel_state: Option<&ParcelState>) -> bool {
+    matches!(parcel_state, None | Some(ParcelState::Loose))
 }
 
 fn carried_container_target(
@@ -260,6 +264,19 @@ mod tests {
             CargoParcel,
             ParcelState::Loose,
         ));
+    }
+
+    fn spawn_test_cargo_item(world: &mut World, position: Position, weight: f32) -> Entity {
+        world
+            .spawn((
+                position,
+                Item,
+                CargoStats {
+                    weight,
+                    volume: 1.0,
+                },
+            ))
+            .id()
     }
 
     fn spawn_carried_test_parcel(world: &mut World, holder: Entity, position: Position) {
@@ -696,7 +713,7 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems(
             (
-                pick_up_player_parcel_from_intent,
+                pick_up_player_item_from_intent,
                 resolve_pickup_requests,
                 resolve_drop_requests,
                 resolve_delivery_requests,
@@ -732,6 +749,43 @@ mod tests {
     }
 
     #[test]
+    fn player_can_pick_up_loose_generic_cargo_on_same_tile() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        insert_player_action_resources(&mut world, PlayerAction::PickUp);
+        let player = spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
+        let item = spawn_test_cargo_item(&mut world, Position { x: 2, y: 2 }, 4.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                pick_up_player_item_from_intent,
+                resolve_pickup_requests,
+                resolve_drop_requests,
+                resolve_delivery_requests,
+                ApplyDeferred,
+                spend_energy_for_successful_cargo_actions,
+                update_porter_jobs_from_cargo_results,
+                clear_failed_porter_cargo_jobs,
+                clamp_inventory_after_cargo_drop,
+                log_failed_cargo_actions,
+                crate::messages::maintain_cargo_messages,
+            )
+                .chain(),
+        );
+        schedule.run(&mut world);
+
+        assert_eq!(
+            world.get::<CarriedBy>(item).map(|carried| carried.holder),
+            Some(player)
+        );
+        assert!(world.get::<CargoParcel>(item).is_none());
+        assert!(world.get::<ParcelState>(item).is_none());
+        assert!(world.get::<Position>(item).is_none());
+        assert_eq!(derived_load(&mut world, player), 4.0);
+    }
+
+    #[test]
     fn failed_pickup_does_not_consume_turn() {
         let mut world = World::new();
         world.insert_resource(Map::generate());
@@ -741,7 +795,7 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems(
             (
-                pick_up_player_parcel_from_intent,
+                pick_up_player_item_from_intent,
                 resolve_pickup_requests,
                 resolve_drop_requests,
                 resolve_delivery_requests,
@@ -776,7 +830,7 @@ mod tests {
         let mut schedule = Schedule::default();
         schedule.add_systems(
             (
-                pick_up_player_parcel_from_intent,
+                pick_up_player_item_from_intent,
                 resolve_pickup_requests,
                 resolve_drop_requests,
                 resolve_delivery_requests,

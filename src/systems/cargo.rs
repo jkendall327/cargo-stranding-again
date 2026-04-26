@@ -560,6 +560,19 @@ mod tests {
             .id()
     }
 
+    fn spawn_loose_item(world: &mut World, position: Position, weight: f32) -> Entity {
+        world
+            .spawn((
+                position,
+                Item,
+                CargoStats {
+                    weight,
+                    volume: 1.0,
+                },
+            ))
+            .id()
+    }
+
     fn spawn_carried_container(
         world: &mut World,
         actor: Entity,
@@ -618,6 +631,49 @@ mod tests {
                 .ready_at,
             u64::from(ITEM_ACTION_ENERGY_COST)
         );
+    }
+
+    #[test]
+    fn pickup_and_drop_work_for_generic_cargo_items() {
+        let mut world = World::new();
+        init_cargo_resources(&mut world);
+        let actor = spawn_actor(&mut world, 40.0);
+        let item = spawn_loose_item(&mut world, Position { x: 1, y: 1 }, 3.0);
+        world
+            .resource_mut::<Messages<PickUpRequest>>()
+            .write(PickUpRequest {
+                actor,
+                item,
+                target: CargoTarget::Slot(CarrySlot::Back),
+            });
+
+        cargo_schedule().run(&mut world);
+
+        assert_eq!(
+            world.get::<CarriedBy>(item).map(|carried| carried.holder),
+            Some(actor)
+        );
+        assert!(world.get::<ParcelState>(item).is_none());
+        assert!(world.get::<Position>(item).is_none());
+        assert_eq!(derived_load(&mut world, actor), 3.0);
+
+        world
+            .resource_mut::<Messages<DropRequest>>()
+            .write(DropRequest {
+                actor,
+                item,
+                at: Position { x: 4, y: 5 },
+            });
+
+        cargo_schedule().run(&mut world);
+
+        assert!(world.get::<CarriedBy>(item).is_none());
+        assert_eq!(
+            world.get::<Position>(item).copied(),
+            Some(Position { x: 4, y: 5 })
+        );
+        assert!(world.get::<ParcelState>(item).is_none());
+        assert_eq!(derived_load(&mut world, actor), 0.0);
     }
 
     #[test]
