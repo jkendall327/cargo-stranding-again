@@ -6,6 +6,8 @@ standalone Bevy ECS for deterministic simulation state.
 Look at the TODO.md file. It contains a big task list for stuff we're going to be doing.
 If I mentioned numbers like '#3' I'm referring to stuff here.
 
+You can use your `mcp__rust_lsp_plugin__` tool for some AST-style codebase manipulation stuff, probably cheaper than burning tokens doing things the hard way. Don't feel pressured to use it, but be aware it exists.
+
 ## Codebase Tour
 
 Start with `src/app.rs` when you want the frame-level story. `Game::run_frame`
