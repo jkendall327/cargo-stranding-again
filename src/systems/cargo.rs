@@ -261,18 +261,6 @@ pub fn log_failed_cargo_actions(mut results: MessageReader<CargoActionResult>) {
     }
 }
 
-pub fn maintain_cargo_messages(
-    mut pickup_requests: ResMut<Messages<PickUpRequest>>,
-    mut drop_requests: ResMut<Messages<DropRequest>>,
-    mut deliver_requests: ResMut<Messages<DeliverRequest>>,
-    mut results: ResMut<Messages<CargoActionResult>>,
-) {
-    pickup_requests.update();
-    drop_requests.update();
-    deliver_requests.update();
-    results.update();
-}
-
 fn validate_pickup(
     queries: &PickupCargoQueries,
     scratch: &PickupScratch,
@@ -538,10 +526,7 @@ mod tests {
         world.insert_resource(EnergyTimeline::default());
         world.insert_resource(InventoryMenuState::default());
         world.insert_resource(DeliveryStats::default());
-        world.init_resource::<Messages<PickUpRequest>>();
-        world.init_resource::<Messages<DropRequest>>();
-        world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoActionResult>>();
+        crate::messages::init_simulation_messages(world);
     }
 
     fn cargo_schedule() -> Schedule {
@@ -557,7 +542,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );

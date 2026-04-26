@@ -61,10 +61,6 @@ pub fn resolve_wait_requests(
     }
 }
 
-pub fn maintain_wait_requests(mut wait_requests: ResMut<Messages<WaitRequest>>) {
-    wait_requests.update();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,7 +69,7 @@ mod tests {
     fn wait_request_resolves_for_non_player_actor() {
         let mut world = World::new();
         world.insert_resource(EnergyTimeline::default());
-        world.init_resource::<Messages<WaitRequest>>();
+        crate::messages::init_simulation_messages(&mut world);
         let actor = world
             .spawn((
                 Velocity { dx: 1, dy: 0 },
@@ -93,7 +89,13 @@ mod tests {
             .write(WaitRequest { actor });
 
         let mut schedule = Schedule::default();
-        schedule.add_systems((resolve_wait_requests, maintain_wait_requests).chain());
+        schedule.add_systems(
+            (
+                resolve_wait_requests,
+                crate::messages::maintain_action_request_messages,
+            )
+                .chain(),
+        );
         schedule.run(&mut world);
 
         let velocity = world.get::<Velocity>(actor).expect("actor has velocity");

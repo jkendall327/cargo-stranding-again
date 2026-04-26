@@ -12,13 +12,12 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
                 systems::open_inventory_from_player_intent,
                 systems::emit_player_cycle_movement_request,
                 systems::resolve_cycle_movement_requests,
-                systems::maintain_cycle_movement_requests,
                 systems::pick_up_player_parcel_from_intent,
                 systems::emit_player_wait_request,
                 systems::resolve_wait_requests,
-                systems::maintain_wait_requests,
                 systems::player_actions,
                 systems::resolve_cargo_loss_risk,
+                crate::messages::maintain_action_request_messages,
             )
                 .chain(),
             (
@@ -31,7 +30,7 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
                 systems::clear_failed_porter_cargo_jobs,
                 systems::clamp_inventory_after_cargo_drop,
                 systems::log_failed_cargo_actions,
-                systems::maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         )
@@ -57,7 +56,7 @@ pub(crate) fn autonomous_actor_phase_schedule() -> Schedule {
                 systems::clear_failed_porter_cargo_jobs,
                 systems::clamp_inventory_after_cargo_drop,
                 systems::log_failed_cargo_actions,
-                systems::maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         )
@@ -82,7 +81,7 @@ pub fn menu_schedule() -> Schedule {
                 systems::clear_failed_porter_cargo_jobs,
                 systems::clamp_inventory_after_cargo_drop,
                 systems::log_failed_cargo_actions,
-                systems::maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         )

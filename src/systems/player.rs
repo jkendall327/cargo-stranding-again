@@ -222,11 +222,9 @@ mod tests {
     use crate::systems::{
         clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs,
         emit_player_cycle_movement_request, emit_player_wait_request, log_failed_cargo_actions,
-        maintain_cargo_messages, maintain_cycle_movement_requests, maintain_wait_requests,
         resolve_cycle_movement_requests, resolve_delivery_requests, resolve_drop_requests,
         resolve_pickup_requests, resolve_wait_requests, spend_energy_for_successful_cargo_actions,
-        update_porter_jobs_from_cargo_results, CargoActionResult, CycleMovementRequest,
-        DeliverRequest, DropRequest, PickUpRequest, WaitRequest,
+        update_porter_jobs_from_cargo_results,
     };
     use bevy_ecs::schedule::ApplyDeferred;
 
@@ -239,12 +237,7 @@ mod tests {
         world.insert_resource(GameScreen::Playing);
         world.insert_resource(InventoryMenuState::default());
         world.insert_resource(crate::resources::DeliveryStats::default());
-        world.init_resource::<Messages<WaitRequest>>();
-        world.init_resource::<Messages<CycleMovementRequest>>();
-        world.init_resource::<Messages<PickUpRequest>>();
-        world.init_resource::<Messages<DropRequest>>();
-        world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoActionResult>>();
+        crate::messages::init_simulation_messages(world);
     }
 
     fn spawn_test_parcel(world: &mut World, position: Position) {
@@ -444,7 +437,7 @@ mod tests {
             (
                 emit_player_wait_request,
                 resolve_wait_requests,
-                maintain_wait_requests,
+                crate::messages::maintain_action_request_messages,
             )
                 .chain(),
         );
@@ -490,7 +483,7 @@ mod tests {
             (
                 emit_player_wait_request,
                 resolve_wait_requests,
-                maintain_wait_requests,
+                crate::messages::maintain_action_request_messages,
             )
                 .chain(),
         );
@@ -535,7 +528,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );
@@ -568,10 +561,7 @@ mod tests {
         world.insert_resource(EnergyTimeline::default());
         world.insert_resource(InventoryMenuState::default());
         world.insert_resource(crate::resources::DeliveryStats::default());
-        world.init_resource::<Messages<PickUpRequest>>();
-        world.init_resource::<Messages<DropRequest>>();
-        world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoActionResult>>();
+        crate::messages::init_simulation_messages(&mut world);
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
         spawn_carried_test_parcel(&mut world, player, Position { x: 0, y: 0 });
 
@@ -588,7 +578,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );
@@ -618,7 +608,7 @@ mod tests {
             (
                 emit_player_cycle_movement_request,
                 resolve_cycle_movement_requests,
-                maintain_cycle_movement_requests,
+                crate::messages::maintain_action_request_messages,
             )
                 .chain(),
         );
@@ -654,7 +644,7 @@ mod tests {
             (
                 emit_player_cycle_movement_request,
                 resolve_cycle_movement_requests,
-                maintain_cycle_movement_requests,
+                crate::messages::maintain_action_request_messages,
             )
                 .chain(),
         );
@@ -711,7 +701,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );
@@ -759,7 +749,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );
@@ -794,7 +784,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );

@@ -6,6 +6,7 @@ pub mod headless;
 pub mod input;
 pub mod logging;
 pub mod map;
+pub mod messages;
 pub mod momentum;
 pub mod movement;
 pub mod render;

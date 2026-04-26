@@ -43,10 +43,6 @@ pub fn resolve_cycle_movement_requests(
     }
 }
 
-pub fn maintain_cycle_movement_requests(mut requests: ResMut<Messages<CycleMovementRequest>>) {
-    requests.update();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -55,7 +51,7 @@ mod tests {
     fn cycle_movement_request_resolves_for_non_player_actor() {
         let mut world = World::new();
         world.insert_resource(EnergyTimeline::default());
-        world.init_resource::<Messages<CycleMovementRequest>>();
+        crate::messages::init_simulation_messages(&mut world);
         let actor = world
             .spawn((MovementState::default(), ActionEnergy::default()))
             .id();
@@ -67,7 +63,7 @@ mod tests {
         schedule.add_systems(
             (
                 resolve_cycle_movement_requests,
-                maintain_cycle_movement_requests,
+                crate::messages::maintain_action_request_messages,
             )
                 .chain(),
         );
@@ -90,7 +86,7 @@ mod tests {
     fn cycle_movement_request_skips_actor_that_is_not_ready() {
         let mut world = World::new();
         world.insert_resource(EnergyTimeline::default());
-        world.init_resource::<Messages<CycleMovementRequest>>();
+        crate::messages::init_simulation_messages(&mut world);
         let energy = ActionEnergy {
             ready_at: 1,
             ..Default::default()

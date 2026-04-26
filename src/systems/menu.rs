@@ -69,10 +69,8 @@ mod tests {
     use crate::systems::inventory::inventory_actions;
     use crate::systems::{
         clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs, log_failed_cargo_actions,
-        maintain_cargo_messages, resolve_delivery_requests, resolve_drop_requests,
-        resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
-        update_porter_jobs_from_cargo_results, CargoActionResult, DeliverRequest, DropRequest,
-        PickUpRequest,
+        resolve_delivery_requests, resolve_drop_requests, resolve_pickup_requests,
+        spend_energy_for_successful_cargo_actions, update_porter_jobs_from_cargo_results,
     };
     use bevy_ecs::schedule::ApplyDeferred;
 
@@ -113,10 +111,7 @@ mod tests {
         world.insert_resource(InventoryIntent::default());
         world.insert_resource(EnergyTimeline::default());
         world.insert_resource(crate::resources::DeliveryStats::default());
-        world.init_resource::<Messages<PickUpRequest>>();
-        world.init_resource::<Messages<DropRequest>>();
-        world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoActionResult>>();
+        crate::messages::init_simulation_messages(world);
         world.insert_resource(MenuInputState {
             action: Some(action),
         });
@@ -137,7 +132,7 @@ mod tests {
                 clear_failed_porter_cargo_jobs,
                 clamp_inventory_after_cargo_drop,
                 log_failed_cargo_actions,
-                maintain_cargo_messages,
+                crate::messages::maintain_cargo_messages,
             )
                 .chain(),
         );
