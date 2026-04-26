@@ -21,18 +21,14 @@ type WaitActorItem<'a> = (
 
 pub fn emit_player_wait_request(
     intent: Res<PlayerIntent>,
-    player_query: Query<Entity, With<Player>>,
+    player: Single<Entity, With<Player>>,
     mut wait_requests: MessageWriter<WaitRequest>,
 ) {
     let Some(PlayerAction::Wait) = intent.action else {
         return;
     };
 
-    let Ok(actor) = player_query.single() else {
-        return;
-    };
-
-    wait_requests.write(WaitRequest { actor });
+    wait_requests.write(WaitRequest { actor: *player });
 }
 
 pub fn resolve_wait_requests(

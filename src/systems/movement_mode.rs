@@ -11,18 +11,14 @@ pub struct CycleMovementRequest {
 
 pub fn emit_player_cycle_movement_request(
     intent: Res<PlayerIntent>,
-    player_query: Query<Entity, With<Player>>,
+    player: Single<Entity, With<Player>>,
     mut requests: MessageWriter<CycleMovementRequest>,
 ) {
     let Some(PlayerAction::CycleMovementMode) = intent.action else {
         return;
     };
 
-    let Ok(actor) = player_query.single() else {
-        return;
-    };
-
-    requests.write(CycleMovementRequest { actor });
+    requests.write(CycleMovementRequest { actor: *player });
 }
 
 pub fn resolve_cycle_movement_requests(

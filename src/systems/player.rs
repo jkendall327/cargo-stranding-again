@@ -34,16 +34,14 @@ pub fn open_inventory_from_player_intent(
     timeline: Res<EnergyTimeline>,
     mut screen: ResMut<GameScreen>,
     mut inventory_menu: ResMut<InventoryMenuState>,
-    player_query: Query<(Entity, &ActionEnergy), With<Player>>,
+    player: Single<(Entity, &ActionEnergy), With<Player>>,
     carried_parcels: Query<&CarriedBy, With<CargoParcel>>,
 ) {
     let Some(PlayerAction::OpenInventory) = intent.action else {
         return;
     };
 
-    let Ok((player_entity, energy)) = player_query.single() else {
-        return;
-    };
+    let (player_entity, energy) = player.into_inner();
     if !energy.is_ready(timeline.now) {
         return;
     }
@@ -61,7 +59,7 @@ pub fn pick_up_player_parcel_from_intent(
     mut commands: Commands,
     intent: Res<PlayerIntent>,
     timeline: Res<EnergyTimeline>,
-    mut player_query: Query<
+    player: Single<
         (
             Entity,
             &Position,
@@ -77,11 +75,7 @@ pub fn pick_up_player_parcel_from_intent(
         return;
     };
 
-    let Ok((player_entity, player_position, mut velocity, mut cargo, mut energy)) =
-        player_query.single_mut()
-    else {
-        return;
-    };
+    let (player_entity, player_position, mut velocity, mut cargo, mut energy) = player.into_inner();
     if !energy.is_ready(timeline.now) {
         return;
     }
