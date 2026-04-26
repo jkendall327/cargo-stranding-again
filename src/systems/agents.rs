@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{Cargo, CargoParcel, CarrySlot, ParcelState};
+use crate::cargo::{Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, Container, ParcelState};
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};
@@ -81,12 +81,13 @@ pub fn porter_jobs(world: &mut World) {
                 }
 
                 if snapshot.position == parcel_position {
+                    let target = carried_container_target(world, porter_entity);
                     world
                         .resource_mut::<Messages<PickUpRequest>>()
                         .write(PickUpRequest {
                             actor: porter_entity,
                             item: parcel_entity,
-                            slot: CarrySlot::Back,
+                            target,
                         });
                     tracing::debug!(
                         porter = ?porter_entity,
@@ -119,6 +120,15 @@ pub fn porter_jobs(world: &mut World) {
             }
         }
     }
+}
+
+fn carried_container_target(world: &mut World, actor: Entity) -> CargoTarget {
+    let mut query = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
+    query
+        .iter(world)
+        .filter_map(|(entity, carried_by)| (carried_by.holder == actor).then_some(entity))
+        .min_by_key(|entity| entity.to_bits())
+        .map_or(CargoTarget::Slot(CarrySlot::Back), CargoTarget::Container)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -256,7 +266,7 @@ fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cargo::{CargoStats, CarriedBy, Item};
+    use crate::cargo::{CargoStats, Item};
     use crate::energy::ITEM_ACTION_ENERGY_COST;
     use crate::resources::DeliveryStats;
     use crate::systems::{
@@ -302,22 +312,39 @@ mod tests {
     }
 
     fn spawn_test_porter(world: &mut World, id: usize, position: Position) {
+        let porter = world
+            .spawn((
+                Actor,
+                AutonomousActor,
+                WantsAction,
+                Porter { id },
+                position,
+                Velocity::default(),
+                Cargo {
+                    current_weight: 0.0,
+                    max_weight: 35.0,
+                },
+                AssignedJob {
+                    phase: JobPhase::FindParcel,
+                    parcel: None,
+                },
+                ActionEnergy::default(),
+            ))
+            .id();
         world.spawn((
-            Actor,
-            AutonomousActor,
-            WantsAction,
-            Porter { id },
-            position,
-            Velocity::default(),
-            Cargo {
-                current_weight: 0.0,
-                max_weight: 35.0,
+            Item,
+            CargoStats {
+                weight: 2.0,
+                volume: 3.0,
             },
-            AssignedJob {
-                phase: JobPhase::FindParcel,
-                parcel: None,
+            Container {
+                volume_capacity: 10.0,
+                weight_capacity: 20.0,
             },
-            ActionEnergy::default(),
+            CarriedBy {
+                holder: porter,
+                slot: CarrySlot::Back,
+            },
         ));
     }
 
@@ -404,11 +431,10 @@ mod tests {
         assert_eq!(delivered_parcels, 1);
 
         let mut cargo_query = world.query_filtered::<&Cargo, With<Porter>>();
-        let empty_porters = cargo_query
-            .iter(&world)
-            .filter(|cargo| cargo.current_weight == 0.0)
-            .count();
-        assert_eq!(empty_porters, 1);
+        let cargo = cargo_query
+            .single(&world)
+            .expect("test setup should leave exactly one porter");
+        assert_eq!(cargo.current_weight, 2.0);
     }
 
     #[test]

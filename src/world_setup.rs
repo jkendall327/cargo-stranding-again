@@ -1,7 +1,8 @@
 use bevy_ecs::prelude::*;
 
 use crate::cargo::{
-    refresh_cargo_cache, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelState,
+    refresh_cargo_cache, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Container, Item,
+    ParcelState,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -72,26 +73,59 @@ pub fn init_world(world: &mut World) {
             slot: CarrySlot::Chest,
         },
     ));
+    world.spawn((
+        Item,
+        CargoStats {
+            weight: 2.0,
+            volume: 3.0,
+        },
+        Container {
+            volume_capacity: 12.0,
+            weight_capacity: 25.0,
+        },
+        CarriedBy {
+            holder: player_entity,
+            slot: CarrySlot::Back,
+        },
+    ));
     refresh_cargo_cache(world, player_entity);
 
     for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {
+        let porter_entity = world
+            .spawn((
+                Actor,
+                AutonomousActor,
+                WantsAction,
+                Porter { id },
+                Position { x, y },
+                Velocity::default(),
+                Cargo {
+                    current_weight: 0.0,
+                    max_weight: 35.0,
+                },
+                AssignedJob {
+                    phase: JobPhase::FindParcel,
+                    parcel: None,
+                },
+                ActionEnergy::default(),
+            ))
+            .id();
         world.spawn((
-            Actor,
-            AutonomousActor,
-            WantsAction,
-            Porter { id },
-            Position { x, y },
-            Velocity::default(),
-            Cargo {
-                current_weight: 0.0,
-                max_weight: 35.0,
+            Item,
+            CargoStats {
+                weight: 2.0,
+                volume: 3.0,
             },
-            AssignedJob {
-                phase: JobPhase::FindParcel,
-                parcel: None,
+            Container {
+                volume_capacity: 10.0,
+                weight_capacity: 20.0,
             },
-            ActionEnergy::default(),
+            CarriedBy {
+                holder: porter_entity,
+                slot: CarrySlot::Back,
+            },
         ));
+        refresh_cargo_cache(world, porter_entity);
     }
 
     for (x, y, weight) in [

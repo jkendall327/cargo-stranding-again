@@ -1,16 +1,28 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{CargoParcel, CarriedBy};
+use crate::cargo::{CargoParcel, CarriedBy, ContainedIn, Container};
 use crate::components::{ActionEnergy, Player, Position};
 use crate::resources::{EnergyTimeline, InventoryAction, InventoryIntent, InventoryMenuState};
 use crate::systems::DropRequest;
+
+type CarriedParcelQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        Option<&'static CarriedBy>,
+        Option<&'static ContainedIn>,
+    ),
+    With<CargoParcel>,
+>;
 
 pub fn inventory_actions(
     timeline: Res<EnergyTimeline>,
     mut intent: ResMut<InventoryIntent>,
     mut inventory_menu: ResMut<InventoryMenuState>,
     player: Query<(Entity, &Position, &ActionEnergy), With<Player>>,
-    carried_parcels: Query<(Entity, &CarriedBy), With<CargoParcel>>,
+    carried_parcels: CarriedParcelQuery,
+    containers: Query<&CarriedBy, With<Container>>,
     mut drop_requests: MessageWriter<DropRequest>,
 ) {
     let action = intent.action.take();
@@ -28,6 +40,7 @@ pub fn inventory_actions(
                 &mut inventory_menu,
                 player,
                 &carried_parcels,
+                &containers,
                 &mut drop_requests,
             );
         }
@@ -38,7 +51,8 @@ fn drop_selected_inventory_parcel(
     timeline: &EnergyTimeline,
     inventory_menu: &mut InventoryMenuState,
     player: (Entity, &Position, &ActionEnergy),
-    carried_parcels: &Query<(Entity, &CarriedBy), With<CargoParcel>>,
+    carried_parcels: &CarriedParcelQuery,
+    containers: &Query<&CarriedBy, With<Container>>,
     drop_requests: &mut MessageWriter<DropRequest>,
 ) -> bool {
     let (player_entity, player_position, energy) = player;
@@ -48,7 +62,10 @@ fn drop_selected_inventory_parcel(
 
     let mut parcels = carried_parcels
         .iter()
-        .filter_map(|(entity, carried_by)| (carried_by.holder == player_entity).then_some(entity))
+        .filter_map(|(entity, carried_by, contained_in)| {
+            parcel_carried_by_actor(carried_by, contained_in, containers, player_entity)
+                .then_some(entity)
+        })
         .collect::<Vec<_>>();
     parcels.sort_by_key(|entity| entity.to_bits());
     inventory_menu.clamp_to_item_count(parcels.len());
@@ -72,4 +89,18 @@ fn drop_selected_inventory_parcel(
     );
 
     true
+}
+
+fn parcel_carried_by_actor(
+    carried_by: Option<&CarriedBy>,
+    contained_in: Option<&ContainedIn>,
+    containers: &Query<&CarriedBy, With<Container>>,
+    actor: Entity,
+) -> bool {
+    carried_by.is_some_and(|carried_by| carried_by.holder == actor)
+        || contained_in.is_some_and(|contained_in| {
+            containers
+                .get(contained_in.container)
+                .is_ok_and(|carried_by| carried_by.holder == actor)
+        })
 }

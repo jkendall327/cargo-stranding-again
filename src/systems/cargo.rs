@@ -1,9 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bevy_ecs::prelude::*;
+use bevy_ecs::system::SystemParam;
 
 use crate::cargo::{
-    Cargo, CargoError, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelState,
+    Cargo, CargoError, CargoParcel, CargoStats, CargoTarget, CarriedBy, CarrySlot, ContainedIn,
+    Container, Item, ParcelState,
 };
 use crate::components::{ActionEnergy, AssignedJob, JobPhase, Player, Porter, Position};
 use crate::energy::ITEM_ACTION_ENERGY_COST;
@@ -14,7 +16,7 @@ use crate::resources::{DeliveryStats, EnergyTimeline, InventoryMenuState};
 pub struct PickUpRequest {
     pub actor: Entity,
     pub item: Entity,
-    pub slot: CarrySlot,
+    pub target: CargoTarget,
 }
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,8 +61,24 @@ type ItemState<'a> = (
     Option<&'a Item>,
     Option<&'a CargoStats>,
     Option<&'a CarriedBy>,
+    Option<&'a ContainedIn>,
     Option<&'a ParcelState>,
 );
+
+#[derive(SystemParam)]
+pub struct PickupCargoQueries<'w, 's> {
+    cargo: Query<'w, 's, &'static Cargo>,
+    items: Query<'w, 's, ItemState<'static>>,
+    direct_carries: Query<'w, 's, (Entity, &'static CargoStats, &'static CarriedBy)>,
+    containers: Query<'w, 's, (&'static Container, &'static CarriedBy)>,
+    contained_items: Query<'w, 's, (&'static CargoStats, &'static ContainedIn)>,
+}
+
+struct PickupScratch {
+    occupied_slots: HashSet<(Entity, CarrySlot)>,
+    actor_loads: HashMap<Entity, f32>,
+    container_loads: HashMap<Entity, ContainerLoad>,
+}
 
 /// Resolves pickup requests into entity relationship changes.
 ///
@@ -71,28 +89,42 @@ pub fn resolve_pickup_requests(
     mut pickup_requests: MessageReader<PickUpRequest>,
     mut changed: MessageWriter<CargoChanged>,
     mut results: MessageWriter<CargoActionResult>,
-    cargo: Query<&Cargo>,
-    items: Query<ItemState>,
-    carried_items: Query<(&CargoStats, &CarriedBy)>,
+    queries: PickupCargoQueries,
 ) {
-    let mut occupied_slots = occupied_slots_from_query(&carried_items);
+    let mut scratch = PickupScratch {
+        occupied_slots: occupied_slots_from_query(&queries.direct_carries),
+        actor_loads: actor_loads_from_query(&queries.direct_carries, &queries.contained_items),
+        container_loads: container_loads_from_query(&queries.contained_items),
+    };
     for request in pickup_requests.read() {
-        let result = validate_pickup(
-            &cargo,
-            &items,
-            &carried_items,
-            &occupied_slots,
-            request.actor,
-            request.item,
-            request.slot,
-        );
+        let result = validate_pickup(&queries, &scratch, request);
         if result.is_ok() {
-            commands.entity(request.item).insert(CarriedBy {
-                holder: request.actor,
-                slot: request.slot,
-            });
-            occupied_slots.insert((request.actor, request.slot));
-            if has_parcel_state(&items, request.item) {
+            match request.target {
+                CargoTarget::Slot(slot) => {
+                    commands.entity(request.item).insert(CarriedBy {
+                        holder: request.actor,
+                        slot,
+                    });
+                    scratch.occupied_slots.insert((request.actor, slot));
+                }
+                CargoTarget::Container(container) => {
+                    commands
+                        .entity(request.item)
+                        .insert(ContainedIn { container });
+                }
+            }
+            let (_, stats, _, _, _) = queries
+                .items
+                .get(request.item)
+                .expect("validated pickup item should remain queryable");
+            let stats = stats.expect("validated pickup item should have cargo stats");
+            *scratch.actor_loads.entry(request.actor).or_default() += stats.weight;
+            if let CargoTarget::Container(container) = request.target {
+                let load = scratch.container_loads.entry(container).or_default();
+                load.weight += stats.weight;
+                load.volume += stats.volume;
+            }
+            if has_parcel_state(&queries.items, request.item) {
                 commands
                     .entity(request.item)
                     .insert(ParcelState::CarriedBy(request.actor));
@@ -118,13 +150,15 @@ pub fn resolve_drop_requests(
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
     items: Query<ItemState>,
+    containers: Query<&CarriedBy, With<Container>>,
 ) {
     for request in drop_requests.read() {
-        let result = validate_drop(&cargo, &items, request.actor, request.item);
+        let result = validate_drop(&cargo, &items, &containers, request.actor, request.item);
         if result.is_ok() {
             commands
                 .entity(request.item)
                 .remove::<CarriedBy>()
+                .remove::<ContainedIn>()
                 .insert(request.at);
             if has_parcel_state(&items, request.item) {
                 commands.entity(request.item).insert(ParcelState::Loose);
@@ -150,13 +184,15 @@ pub fn resolve_delivery_requests(
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
     items: Query<ItemState>,
+    containers: Query<&CarriedBy, With<Container>>,
 ) {
     for request in deliver_requests.read() {
-        let result = validate_delivery(&cargo, &items, request.actor, request.item);
+        let result = validate_delivery(&cargo, &items, &containers, request.actor, request.item);
         if result.is_ok() {
             commands
                 .entity(request.item)
                 .remove::<CarriedBy>()
+                .remove::<ContainedIn>()
                 .insert(ParcelState::Delivered);
             changed.write(CargoChanged {
                 actor: request.actor,
@@ -173,11 +209,12 @@ pub fn resolve_delivery_requests(
 
 pub fn refresh_changed_cargo_caches(
     mut changed: MessageReader<CargoChanged>,
-    carried_items: Query<(&CargoStats, &CarriedBy)>,
+    direct_carries: Query<(Entity, &CargoStats, &CarriedBy)>,
+    contained_items: Query<(&CargoStats, &ContainedIn)>,
     mut cargo: Query<&mut Cargo>,
 ) {
     for event in changed.read() {
-        let load = derived_load_from_query(&carried_items, event.actor);
+        let load = derived_load_from_query(&direct_carries, &contained_items, event.actor);
         if let Ok(mut cargo) = cargo.get_mut(event.actor) {
             cargo.current_weight = load;
         }
@@ -224,7 +261,8 @@ pub fn clear_failed_porter_cargo_jobs(
 pub fn clamp_inventory_after_cargo_drop(
     mut results: MessageReader<CargoActionResult>,
     players: Query<(), With<Player>>,
-    carried_parcels: Query<&CarriedBy, With<CargoParcel>>,
+    carried_parcels: Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoParcel>>,
+    containers: Query<&CarriedBy, With<Container>>,
     mut inventory_menu: ResMut<InventoryMenuState>,
 ) {
     for event in results.read() {
@@ -233,6 +271,7 @@ pub fn clamp_inventory_after_cargo_drop(
                 event,
                 &players,
                 &carried_parcels,
+                &containers,
                 &mut inventory_menu,
             );
         }
@@ -268,31 +307,60 @@ pub fn maintain_cargo_messages(
 }
 
 fn validate_pickup(
-    cargo: &Query<&Cargo>,
-    items: &Query<ItemState>,
-    carried_items: &Query<(&CargoStats, &CarriedBy)>,
-    occupied_slots: &HashSet<(Entity, CarrySlot)>,
-    actor: Entity,
-    item: Entity,
-    slot: CarrySlot,
+    queries: &PickupCargoQueries,
+    scratch: &PickupScratch,
+    request: &PickUpRequest,
 ) -> Result<(), CargoError> {
-    let cargo = cargo.get(actor).map_err(|_| CargoError::MissingCargo)?;
-    let (item_marker, stats, carried_by, parcel_state) =
-        items.get(item).map_err(|_| CargoError::MissingItem)?;
+    let cargo = queries
+        .cargo
+        .get(request.actor)
+        .map_err(|_| CargoError::MissingCargo)?;
+    let (item_marker, stats, carried_by, contained_in, parcel_state) = queries
+        .items
+        .get(request.item)
+        .map_err(|_| CargoError::MissingItem)?;
     let stats = stats.ok_or(CargoError::MissingItem)?;
 
     if item_marker.is_none()
         || carried_by.is_some()
-        || !parcel_can_be_picked_up_by(parcel_state, actor)
+        || contained_in.is_some()
+        || !parcel_can_be_picked_up_by(parcel_state, request.actor)
     {
         return Err(CargoError::NotLoose);
     }
 
-    if occupied_slots.contains(&(actor, slot)) {
-        return Err(CargoError::SlotOccupied);
+    match request.target {
+        CargoTarget::Slot(slot) => {
+            if scratch.occupied_slots.contains(&(request.actor, slot)) {
+                return Err(CargoError::SlotOccupied);
+            }
+        }
+        CargoTarget::Container(container_entity) => {
+            let (container, carried_by) = queries
+                .containers
+                .get(container_entity)
+                .map_err(|_| CargoError::MissingContainer)?;
+            if carried_by.holder != request.actor {
+                return Err(CargoError::NotCarriedByHolder);
+            }
+            let load = scratch
+                .container_loads
+                .get(&container_entity)
+                .copied()
+                .unwrap_or_default();
+            if load.weight + stats.weight > container.weight_capacity
+                || load.volume + stats.volume > container.volume_capacity
+            {
+                return Err(CargoError::ContainerCapacityExceeded);
+            }
+        }
     }
 
-    let current_load = derived_load_from_query(carried_items, actor);
+    let current_load = scratch
+        .actor_loads
+        .get(&request.actor)
+        .copied()
+        .unwrap_or_default();
     if current_load + stats.weight > cargo.max_weight {
         return Err(CargoError::CapacityExceeded);
     }
@@ -303,39 +371,55 @@ fn validate_pickup(
 fn validate_drop(
     cargo: &Query<&Cargo>,
     items: &Query<ItemState>,
+    containers: &Query<&CarriedBy, With<Container>>,
     actor: Entity,
     item: Entity,
 ) -> Result<(), CargoError> {
     cargo.get(actor).map_err(|_| CargoError::MissingCargo)?;
-    let (item_marker, stats, carried_by, _) =
+    let (item_marker, stats, carried_by, contained_in, _) =
         items.get(item).map_err(|_| CargoError::MissingItem)?;
     if item_marker.is_none() || stats.is_none() {
         return Err(CargoError::MissingItem);
     }
-    let carried_by = carried_by.ok_or(CargoError::NotCarriedByHolder)?;
-    if carried_by.holder != actor {
-        return Err(CargoError::NotCarriedByHolder);
+    if carried_by.is_some_and(|carried_by| carried_by.holder == actor) {
+        return Ok(());
     }
-    Ok(())
+    if let Some(contained_in) = contained_in {
+        if containers
+            .get(contained_in.container)
+            .is_ok_and(|carried_by| carried_by.holder == actor)
+        {
+            return Ok(());
+        }
+    }
+    Err(CargoError::NotCarriedByHolder)
 }
 
 fn validate_delivery(
     cargo: &Query<&Cargo>,
     items: &Query<ItemState>,
+    containers: &Query<&CarriedBy, With<Container>>,
     actor: Entity,
     item: Entity,
 ) -> Result<(), CargoError> {
     cargo.get(actor).map_err(|_| CargoError::MissingCargo)?;
-    let (item_marker, stats, carried_by, parcel_state) =
+    let (item_marker, stats, carried_by, contained_in, parcel_state) =
         items.get(item).map_err(|_| CargoError::MissingItem)?;
     if item_marker.is_none() || stats.is_none() || parcel_state.is_none() {
         return Err(CargoError::MissingItem);
     }
-    let carried_by = carried_by.ok_or(CargoError::NotCarriedByHolder)?;
-    if carried_by.holder != actor {
-        return Err(CargoError::NotCarriedByHolder);
+    if carried_by.is_some_and(|carried_by| carried_by.holder == actor) {
+        return Ok(());
     }
-    Ok(())
+    if let Some(contained_in) = contained_in {
+        if containers
+            .get(contained_in.container)
+            .is_ok_and(|carried_by| carried_by.holder == actor)
+        {
+            return Ok(());
+        }
+    }
+    Err(CargoError::NotCarriedByHolder)
 }
 
 fn parcel_can_be_picked_up_by(parcel_state: Option<&ParcelState>, actor: Entity) -> bool {
@@ -350,23 +434,71 @@ fn parcel_can_be_picked_up_by(parcel_state: Option<&ParcelState>, actor: Entity)
 fn has_parcel_state(items: &Query<ItemState>, item: Entity) -> bool {
     items
         .get(item)
-        .is_ok_and(|(_, _, _, parcel_state)| parcel_state.is_some())
+        .is_ok_and(|(_, _, _, _, parcel_state)| parcel_state.is_some())
 }
 
-fn derived_load_from_query(carried_items: &Query<(&CargoStats, &CarriedBy)>, actor: Entity) -> f32 {
-    carried_items
+fn derived_load_from_query(
+    direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
+    contained_items: &Query<(&CargoStats, &ContainedIn)>,
+    actor: Entity,
+) -> f32 {
+    let container_loads = container_loads_from_query(contained_items);
+    direct_carries
         .iter()
-        .filter_map(|(stats, carried_by)| (carried_by.holder == actor).then_some(stats.weight))
+        .filter_map(|(entity, stats, carried_by)| {
+            (carried_by.holder == actor).then_some(
+                stats.weight
+                    + container_loads
+                        .get(&entity)
+                        .map(|load| load.weight)
+                        .unwrap_or_default(),
+            )
+        })
         .sum()
 }
 
 fn occupied_slots_from_query(
-    carried_items: &Query<(&CargoStats, &CarriedBy)>,
+    direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
 ) -> HashSet<(Entity, CarrySlot)> {
-    carried_items
+    direct_carries
         .iter()
-        .map(|(_, carried_by)| (carried_by.holder, carried_by.slot))
+        .map(|(_, _, carried_by)| (carried_by.holder, carried_by.slot))
         .collect()
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ContainerLoad {
+    weight: f32,
+    volume: f32,
+}
+
+fn actor_loads_from_query(
+    direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
+    contained_items: &Query<(&CargoStats, &ContainedIn)>,
+) -> HashMap<Entity, f32> {
+    let container_loads = container_loads_from_query(contained_items);
+    let mut actor_loads = HashMap::<Entity, f32>::new();
+    for (entity, stats, carried_by) in direct_carries.iter() {
+        let load = stats.weight
+            + container_loads
+                .get(&entity)
+                .map(|load| load.weight)
+                .unwrap_or_default();
+        *actor_loads.entry(carried_by.holder).or_default() += load;
+    }
+    actor_loads
+}
+
+fn container_loads_from_query(
+    contained_items: &Query<(&CargoStats, &ContainedIn)>,
+) -> HashMap<Entity, ContainerLoad> {
+    let mut loads = HashMap::<Entity, ContainerLoad>::new();
+    for (stats, contained_in) in contained_items.iter() {
+        let load = loads.entry(contained_in.container).or_default();
+        load.weight += stats.weight;
+        load.volume += stats.volume;
+    }
+    loads
 }
 
 fn handle_successful_job_result(
@@ -412,7 +544,8 @@ fn clear_failed_porter_job(
 fn clamp_player_inventory_after_drop(
     event: &CargoActionResult,
     players: &Query<(), With<Player>>,
-    carried_parcels: &Query<&CarriedBy, With<CargoParcel>>,
+    carried_parcels: &Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoParcel>>,
+    containers: &Query<&CarriedBy, With<Container>>,
     inventory_menu: &mut InventoryMenuState,
 ) {
     if event.action != CargoAction::Drop || players.get(event.actor).is_err() {
@@ -421,9 +554,25 @@ fn clamp_player_inventory_after_drop(
 
     let carried_count = carried_parcels
         .iter()
-        .filter(|carried_by| carried_by.holder == event.actor)
+        .filter(|(carried_by, contained_in)| {
+            parcel_carried_by_actor(*carried_by, *contained_in, containers, event.actor)
+        })
         .count();
     inventory_menu.clamp_to_item_count(carried_count);
+}
+
+fn parcel_carried_by_actor(
+    carried_by: Option<&CarriedBy>,
+    contained_in: Option<&ContainedIn>,
+    containers: &Query<&CarriedBy, With<Container>>,
+    actor: Entity,
+) -> bool {
+    carried_by.is_some_and(|carried_by| carried_by.holder == actor)
+        || contained_in.is_some_and(|contained_in| {
+            containers
+                .get(contained_in.container)
+                .is_ok_and(|carried_by| carried_by.holder == actor)
+        })
 }
 
 #[cfg(test)]
@@ -490,6 +639,31 @@ mod tests {
             .id()
     }
 
+    fn spawn_carried_container(
+        world: &mut World,
+        actor: Entity,
+        weight_capacity: f32,
+        volume_capacity: f32,
+    ) -> Entity {
+        world
+            .spawn((
+                Item,
+                CargoStats {
+                    weight: 2.0,
+                    volume: 3.0,
+                },
+                Container {
+                    weight_capacity,
+                    volume_capacity,
+                },
+                CarriedBy {
+                    holder: actor,
+                    slot: CarrySlot::Back,
+                },
+            ))
+            .id()
+    }
+
     #[test]
     fn pickup_succeeds_and_spends_energy_after_cache_refresh() {
         let mut world = World::new();
@@ -501,7 +675,7 @@ mod tests {
             .write(PickUpRequest {
                 actor,
                 item: parcel,
-                slot: CarrySlot::Back,
+                target: CargoTarget::Slot(CarrySlot::Back),
             });
 
         cargo_schedule().run(&mut world);
@@ -541,7 +715,7 @@ mod tests {
             .write(PickUpRequest {
                 actor,
                 item: parcel,
-                slot: CarrySlot::Back,
+                target: CargoTarget::Slot(CarrySlot::Back),
             });
 
         cargo_schedule().run(&mut world);
@@ -590,7 +764,7 @@ mod tests {
             .write(PickUpRequest {
                 actor,
                 item: waiting,
-                slot: CarrySlot::Back,
+                target: CargoTarget::Slot(CarrySlot::Back),
             });
 
         cargo_schedule().run(&mut world);
@@ -628,12 +802,12 @@ mod tests {
             pickup_requests.write(PickUpRequest {
                 actor,
                 item: first,
-                slot: CarrySlot::Back,
+                target: CargoTarget::Slot(CarrySlot::Back),
             });
             pickup_requests.write(PickUpRequest {
                 actor,
                 item: second,
-                slot: CarrySlot::Back,
+                target: CargoTarget::Slot(CarrySlot::Back),
             });
         }
 
@@ -657,6 +831,70 @@ mod tests {
                 .expect("actor should keep energy")
                 .ready_at,
             u64::from(ITEM_ACTION_ENERGY_COST)
+        );
+    }
+
+    #[test]
+    fn pickup_into_carried_container_succeeds_and_uses_derived_load() {
+        let mut world = World::new();
+        init_cargo_resources(&mut world);
+        let actor = spawn_actor(&mut world, 40.0);
+        let container = spawn_carried_container(&mut world, actor, 20.0, 8.0);
+        let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
+        world
+            .resource_mut::<Messages<PickUpRequest>>()
+            .write(PickUpRequest {
+                actor,
+                item: parcel,
+                target: CargoTarget::Container(container),
+            });
+
+        cargo_schedule().run(&mut world);
+
+        assert!(world.get::<CarriedBy>(parcel).is_none());
+        assert_eq!(
+            world
+                .get::<ContainedIn>(parcel)
+                .map(|contained_in| contained_in.container),
+            Some(container)
+        );
+        assert_eq!(
+            world
+                .get::<Cargo>(actor)
+                .expect("actor should keep cargo")
+                .current_weight,
+            7.0
+        );
+    }
+
+    #[test]
+    fn pickup_into_full_container_fails_without_mutation_or_energy_spend() {
+        let mut world = World::new();
+        init_cargo_resources(&mut world);
+        let actor = spawn_actor(&mut world, 40.0);
+        let container = spawn_carried_container(&mut world, actor, 4.0, 8.0);
+        let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
+        world
+            .resource_mut::<Messages<PickUpRequest>>()
+            .write(PickUpRequest {
+                actor,
+                item: parcel,
+                target: CargoTarget::Container(container),
+            });
+
+        cargo_schedule().run(&mut world);
+
+        assert!(world.get::<ContainedIn>(parcel).is_none());
+        assert_eq!(
+            world.get::<ParcelState>(parcel).copied(),
+            Some(ParcelState::Loose)
+        );
+        assert_eq!(
+            world
+                .get::<ActionEnergy>(actor)
+                .expect("actor should keep energy")
+                .ready_at,
+            0
         );
     }
 

@@ -3,7 +3,9 @@ use bevy_ecs::prelude::*;
 mod cargo;
 mod movement;
 
-use crate::cargo::{Cargo, CargoParcel, CarriedBy, CarrySlot, Item, ParcelState};
+use crate::cargo::{
+    Cargo, CargoParcel, CargoTarget, CarriedBy, ContainedIn, Container, Item, ParcelState,
+};
 use crate::components::*;
 use crate::energy::ActionEnergy;
 use crate::map::Map;
@@ -36,7 +38,8 @@ pub fn open_inventory_from_player_intent(
     mut screen: ResMut<GameScreen>,
     mut inventory_menu: ResMut<InventoryMenuState>,
     player: Single<(Entity, &ActionEnergy), With<Player>>,
-    carried_parcels: Query<&CarriedBy, With<CargoParcel>>,
+    carried_parcels: Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoParcel>>,
+    containers: Query<&CarriedBy, With<Container>>,
 ) {
     let Some(PlayerAction::OpenInventory) = intent.action else {
         return;
@@ -49,11 +52,27 @@ pub fn open_inventory_from_player_intent(
 
     let carried_count = carried_parcels
         .iter()
-        .filter(|carried_by| carried_by.holder == player_entity)
+        .filter(|(carried_by, contained_in)| {
+            parcel_carried_by_actor(*carried_by, *contained_in, &containers, player_entity)
+        })
         .count();
     inventory_menu.clamp_to_item_count(carried_count);
     *screen = GameScreen::InventoryMenu;
     tracing::debug!(carried_count, "opened inventory");
+}
+
+fn parcel_carried_by_actor(
+    carried_by: Option<&CarriedBy>,
+    contained_in: Option<&ContainedIn>,
+    containers: &Query<&CarriedBy, With<Container>>,
+    actor: Entity,
+) -> bool {
+    carried_by.is_some_and(|carried_by| carried_by.holder == actor)
+        || contained_in.is_some_and(|contained_in| {
+            containers
+                .get(contained_in.container)
+                .is_ok_and(|carried_by| carried_by.holder == actor)
+        })
 }
 
 pub fn pick_up_player_parcel_from_intent(
@@ -61,6 +80,7 @@ pub fn pick_up_player_parcel_from_intent(
     timeline: Res<EnergyTimeline>,
     player: Single<(Entity, &Position, &mut Velocity, &ActionEnergy), With<Player>>,
     parcels: Query<PlayerPickupItem, PlayerPickupFilter>,
+    containers: Query<(Entity, &CarriedBy), With<Container>>,
     mut pickup_requests: MessageWriter<PickUpRequest>,
 ) {
     let Some(PlayerAction::PickUp) = intent.action else {
@@ -89,7 +109,7 @@ pub fn pick_up_player_parcel_from_intent(
     pickup_requests.write(PickUpRequest {
         actor: player_entity,
         item: parcel_entity,
-        slot: CarrySlot::Back,
+        target: carried_container_target(player_entity, &containers),
     });
     tracing::debug!(
         x = player_position.x,
@@ -97,6 +117,20 @@ pub fn pick_up_player_parcel_from_intent(
         item = ?parcel_entity,
         "player pickup requested"
     );
+}
+
+fn carried_container_target(
+    actor: Entity,
+    containers: &Query<(Entity, &CarriedBy), With<Container>>,
+) -> CargoTarget {
+    containers
+        .iter()
+        .filter_map(|(entity, carried_by)| (carried_by.holder == actor).then_some(entity))
+        .min_by_key(|entity| entity.to_bits())
+        .map_or(
+            CargoTarget::Slot(crate::cargo::CarrySlot::Back),
+            CargoTarget::Container,
+        )
 }
 
 pub fn player_actions(world: &mut World) {
@@ -174,7 +208,7 @@ pub fn player_actions(world: &mut World) {
 mod tests {
     use super::*;
     use crate::cargo as cargo_model;
-    use crate::cargo::{CargoParcel, CargoStats, CarriedBy, Item};
+    use crate::cargo::{CargoParcel, CargoStats, CarriedBy, CarrySlot, Item};
     use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
     use crate::systems::{

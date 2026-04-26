@@ -202,35 +202,35 @@ Momentum tasks for after the energy timeline:
 
 Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model with entity relationships, carry slots, and derived load totals.
 
-- [ ] Keep the current `Cargo` component temporarily as a compatibility/cache layer.
-- [ ] Define cargo/item components.
-  - [ ] `Item`
-  - [ ] `CargoStats { weight, volume }`
+- [x] Keep the current `Cargo` component temporarily as a compatibility/cache layer.
+- [x] Define cargo/item components.
+  - [x] `Item`
+  - [x] `CargoStats { weight, volume }`
   - [ ] Optional later: dimensions, fragility, stackability, rigidity, wetness, value.
 - [ ] Define carrying/container relationship data.
   - [ ] `CarrySlot` enum: `HandLeft`, `HandRight`, `Back`, `Hip`, `Chest`, `Container(Entity)` or similar.
-  - [ ] `CarriedBy { holder: Entity, slot: CarrySlot }`
-  - [ ] `Container { volume_capacity, weight_capacity }`
-  - [ ] `ContainedIn { container: Entity }`
+  - [x] `CarriedBy { holder: Entity, slot: CarrySlot }`
+  - [x] `Container { volume_capacity, weight_capacity }`
+  - [x] `ContainedIn { container: Entity }`
 - [ ] Rework `CargoParcel` / `ParcelState` to use the new item relationship model.
 - [ ] Add pickup/drop systems.
   - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
   - [x] Drop a carried parcel at the player position using the temporary parcel/cargo model.
   - [ ] Pick up a loose item at the actor position.
   - [x] Fail clearly if the slot is occupied.
-  - [ ] Fail clearly if weight/volume capacity is exceeded.
+  - [x] Fail clearly if weight/volume capacity is exceeded.
   - [ ] Drop carried item at the actor position.
 - [ ] Add derived load calculation.
-  - [ ] Compute total carried weight per actor.
-  - [ ] Cache it into the existing `Cargo` component or replace `Cargo` with `Load`.
-  - [ ] Ensure movement uses derived load, not hand-edited totals.
-- [ ] Update NPC porter jobs to use pickup/drop relationship transitions instead of mutating `cargo.current_weight`.
+  - [x] Compute total carried weight per actor.
+  - [x] Cache it into the existing `Cargo` component or replace `Cargo` with `Load`.
+  - [x] Ensure movement uses derived load, not hand-edited totals.
+- [x] Update NPC porter jobs to use pickup/drop relationship transitions instead of mutating `cargo.current_weight`.
 - [ ] Render loose, assigned, and carried items clearly.
 - [ ] Add tests.
-  - [ ] Cannot pick up oversized cargo.
-  - [ ] Cannot put cargo into a full container.
+  - [x] Cannot pick up oversized cargo.
+  - [x] Cannot put cargo into a full container.
   - [x] Dropping temporary parcel cargo makes it loose at the actor position.
-  - [ ] NPC delivery still increments delivered parcel count.
+  - [x] NPC delivery still increments delivered parcel count.
 
 Notes:
 
