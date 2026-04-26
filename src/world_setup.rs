@@ -69,7 +69,7 @@ pub fn init_world(world: &mut World) {
         },
         CarriedBy {
             holder: player_entity,
-            slot: CarrySlot::Back,
+            slot: CarrySlot::Chest,
         },
     ));
     refresh_cargo_cache(world, player_entity);

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy_ecs::prelude::*;
 
 use crate::cargo::{
@@ -73,13 +75,23 @@ pub fn resolve_pickup_requests(
     items: Query<ItemState>,
     carried_items: Query<(&CargoStats, &CarriedBy)>,
 ) {
+    let mut occupied_slots = occupied_slots_from_query(&carried_items);
     for request in pickup_requests.read() {
-        let result = validate_pickup(&cargo, &items, &carried_items, request.actor, request.item);
+        let result = validate_pickup(
+            &cargo,
+            &items,
+            &carried_items,
+            &occupied_slots,
+            request.actor,
+            request.item,
+            request.slot,
+        );
         if result.is_ok() {
             commands.entity(request.item).insert(CarriedBy {
                 holder: request.actor,
                 slot: request.slot,
             });
+            occupied_slots.insert((request.actor, request.slot));
             if has_parcel_state(&items, request.item) {
                 commands
                     .entity(request.item)
@@ -259,8 +271,10 @@ fn validate_pickup(
     cargo: &Query<&Cargo>,
     items: &Query<ItemState>,
     carried_items: &Query<(&CargoStats, &CarriedBy)>,
+    occupied_slots: &HashSet<(Entity, CarrySlot)>,
     actor: Entity,
     item: Entity,
+    slot: CarrySlot,
 ) -> Result<(), CargoError> {
     let cargo = cargo.get(actor).map_err(|_| CargoError::MissingCargo)?;
     let (item_marker, stats, carried_by, parcel_state) =
@@ -272,6 +286,10 @@ fn validate_pickup(
         || !parcel_can_be_picked_up_by(parcel_state, actor)
     {
         return Err(CargoError::NotLoose);
+    }
+
+    if occupied_slots.contains(&(actor, slot)) {
+        return Err(CargoError::SlotOccupied);
     }
 
     let current_load = derived_load_from_query(carried_items, actor);
@@ -340,6 +358,15 @@ fn derived_load_from_query(carried_items: &Query<(&CargoStats, &CarriedBy)>, act
         .iter()
         .filter_map(|(stats, carried_by)| (carried_by.holder == actor).then_some(stats.weight))
         .sum()
+}
+
+fn occupied_slots_from_query(
+    carried_items: &Query<(&CargoStats, &CarriedBy)>,
+) -> HashSet<(Entity, CarrySlot)> {
+    carried_items
+        .iter()
+        .map(|(_, carried_by)| (carried_by.holder, carried_by.slot))
+        .collect()
 }
 
 fn handle_successful_job_result(
@@ -537,6 +564,99 @@ mod tests {
                 .expect("actor should keep energy")
                 .ready_at,
             0
+        );
+    }
+
+    #[test]
+    fn occupied_slot_pickup_fails_without_mutation_or_energy_spend() {
+        let mut world = World::new();
+        init_cargo_resources(&mut world);
+        let actor = spawn_actor(&mut world, 40.0);
+        let carried = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
+        world.entity_mut(carried).insert((
+            CarriedBy {
+                holder: actor,
+                slot: CarrySlot::Back,
+            },
+            ParcelState::CarriedBy(actor),
+        ));
+        world
+            .get_mut::<Cargo>(actor)
+            .expect("actor should keep cargo")
+            .current_weight = 5.0;
+        let waiting = spawn_loose_parcel(&mut world, Position { x: 2, y: 1 }, 5.0);
+        world
+            .resource_mut::<Messages<PickUpRequest>>()
+            .write(PickUpRequest {
+                actor,
+                item: waiting,
+                slot: CarrySlot::Back,
+            });
+
+        cargo_schedule().run(&mut world);
+
+        assert!(world.get::<CarriedBy>(waiting).is_none());
+        assert_eq!(
+            world.get::<ParcelState>(waiting).copied(),
+            Some(ParcelState::Loose)
+        );
+        assert_eq!(
+            world
+                .get::<Cargo>(actor)
+                .expect("actor should keep cargo")
+                .current_weight,
+            5.0
+        );
+        assert_eq!(
+            world
+                .get::<ActionEnergy>(actor)
+                .expect("actor should keep energy")
+                .ready_at,
+            0
+        );
+    }
+
+    #[test]
+    fn same_schedule_pickups_cannot_share_a_slot() {
+        let mut world = World::new();
+        init_cargo_resources(&mut world);
+        let actor = spawn_actor(&mut world, 40.0);
+        let first = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
+        let second = spawn_loose_parcel(&mut world, Position { x: 2, y: 1 }, 5.0);
+        {
+            let mut pickup_requests = world.resource_mut::<Messages<PickUpRequest>>();
+            pickup_requests.write(PickUpRequest {
+                actor,
+                item: first,
+                slot: CarrySlot::Back,
+            });
+            pickup_requests.write(PickUpRequest {
+                actor,
+                item: second,
+                slot: CarrySlot::Back,
+            });
+        }
+
+        cargo_schedule().run(&mut world);
+
+        let carried_count = [first, second]
+            .into_iter()
+            .filter(|item| world.get::<CarriedBy>(*item).is_some())
+            .count();
+        assert_eq!(carried_count, 1);
+        assert_eq!(
+            world
+                .get::<Cargo>(actor)
+                .expect("actor should keep cargo")
+                .current_weight,
+            5.0
+        );
+        assert_eq!(
+            world
+                .get::<ActionEnergy>(actor)
+                .expect("actor should keep energy")
+                .ready_at,
+            u64::from(ITEM_ACTION_ENERGY_COST)
         );
     }
 

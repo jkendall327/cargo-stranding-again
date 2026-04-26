@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::components::{Player, Position};
+use crate::components::Player;
 
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Item;
@@ -11,9 +11,12 @@ pub struct CargoStats {
     pub volume: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CarrySlot {
+    /// Primary back carry point for loose parcels and future backpacks.
     Back,
+    /// Body-worn starter load that leaves the back slot available for parcels.
+    Chest,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,9 +64,11 @@ pub enum CargoError {
     MissingItem,
     NotLoose,
     NotCarriedByHolder,
+    SlotOccupied,
     CapacityExceeded,
 }
 
+/// Lists parcel cargo currently carried by a holder, independent of slot.
 pub fn carried_parcels(world: &mut World, holder: Entity) -> Vec<CarriedParcelEntry> {
     let mut parcel_query = world.query::<(Entity, &CargoParcel, Option<&CarriedBy>)>();
     let mut parcels = parcel_query
@@ -101,10 +106,6 @@ pub fn player_carried_parcel_count(world: &mut World) -> usize {
     carried_parcel_count(world, player_entity)
 }
 
-pub fn cargo_load(world: &World, holder: Entity) -> Option<f32> {
-    world.get::<Cargo>(holder).map(|cargo| cargo.current_weight)
-}
-
 pub fn carried_items(world: &mut World, holder: Entity) -> Vec<CarriedItemEntry> {
     let mut item_query = world.query::<(Entity, &CargoStats, &CarriedBy)>();
     let mut items = item_query
@@ -138,142 +139,6 @@ pub fn refresh_cargo_cache(world: &mut World, holder: Entity) -> bool {
     true
 }
 
-pub fn refresh_all_cargo_caches(world: &mut World) {
-    let holders = {
-        let mut query = world.query::<(Entity, &Cargo)>();
-        query
-            .iter(world)
-            .map(|(entity, _)| entity)
-            .collect::<Vec<_>>()
-    };
-
-    for holder in holders {
-        refresh_cargo_cache(world, holder);
-    }
-}
-
-pub fn can_pick_up_item(world: &mut World, holder: Entity, item: Entity) -> Result<(), CargoError> {
-    let max_weight = world
-        .get::<Cargo>(holder)
-        .ok_or(CargoError::MissingCargo)?
-        .max_weight;
-    let item_weight = world
-        .get::<CargoStats>(item)
-        .ok_or(CargoError::MissingItem)?
-        .weight;
-
-    if world.get::<Item>(item).is_none()
-        || world.get::<CarriedBy>(item).is_some()
-        || !parcel_can_be_picked_up_by(world, holder, item)
-    {
-        return Err(CargoError::NotLoose);
-    }
-
-    let current_load = derived_load(world, holder);
-    if current_load + item_weight > max_weight {
-        return Err(CargoError::CapacityExceeded);
-    }
-
-    Ok(())
-}
-
-pub fn pick_up_item(
-    world: &mut World,
-    holder: Entity,
-    item: Entity,
-    slot: CarrySlot,
-) -> Result<(), CargoError> {
-    can_pick_up_item(world, holder, item)?;
-
-    world.entity_mut(item).insert(CarriedBy { holder, slot });
-
-    if let Some(mut parcel_state) = world.get_mut::<ParcelState>(item) {
-        *parcel_state = ParcelState::CarriedBy(holder);
-    }
-
-    refresh_cargo_cache(world, holder);
-    Ok(())
-}
-
-pub fn drop_item(
-    world: &mut World,
-    holder: Entity,
-    item: Entity,
-    at: Position,
-) -> Result<(), CargoError> {
-    let carried_by = world
-        .get::<CarriedBy>(item)
-        .copied()
-        .ok_or(CargoError::NotCarriedByHolder)?;
-    if carried_by.holder != holder {
-        return Err(CargoError::NotCarriedByHolder);
-    }
-
-    world.entity_mut(item).remove::<CarriedBy>();
-    if let Some(mut item_position) = world.get_mut::<Position>(item) {
-        *item_position = at;
-    } else {
-        world.entity_mut(item).insert(at);
-    }
-    if let Some(mut parcel_state) = world.get_mut::<ParcelState>(item) {
-        *parcel_state = ParcelState::Loose;
-    }
-
-    refresh_cargo_cache(world, holder);
-    Ok(())
-}
-
-pub fn drop_carried_parcel(
-    world: &mut World,
-    holder: Entity,
-    parcel: Entity,
-    at: Position,
-) -> bool {
-    drop_item(world, holder, parcel, at).is_ok()
-}
-
-pub fn deliver_carried_parcel(
-    world: &mut World,
-    holder: Entity,
-    parcel: Entity,
-) -> Result<(), CargoError> {
-    let carried_by = world
-        .get::<CarriedBy>(parcel)
-        .copied()
-        .ok_or(CargoError::NotCarriedByHolder)?;
-    if carried_by.holder != holder {
-        return Err(CargoError::NotCarriedByHolder);
-    }
-
-    world.entity_mut(parcel).remove::<CarriedBy>();
-    let Some(mut parcel_state) = world.get_mut::<ParcelState>(parcel) else {
-        return Err(CargoError::MissingItem);
-    };
-    *parcel_state = ParcelState::Delivered;
-    refresh_cargo_cache(world, holder);
-    Ok(())
-}
-
-pub fn drop_carried_parcels(world: &mut World, holder: Entity, at: Position) -> usize {
-    let parcels = carried_parcels(world, holder);
-    let mut dropped = 0;
-    for parcel in parcels {
-        if drop_carried_parcel(world, holder, parcel.entity, at) {
-            dropped += 1;
-        }
-    }
-    dropped
-}
-
-fn parcel_can_be_picked_up_by(world: &World, holder: Entity, item: Entity) -> bool {
-    match world.get::<ParcelState>(item) {
-        None => true,
-        Some(ParcelState::Loose) => true,
-        Some(ParcelState::AssignedTo(assigned_holder)) => *assigned_holder == holder,
-        Some(ParcelState::CarriedBy(_) | ParcelState::Delivered) => false,
-    }
-}
-
 fn player_entity(world: &mut World) -> Option<Entity> {
     let mut player_query = world.query_filtered::<Entity, With<Player>>();
     player_query.iter(world).next()
@@ -292,10 +157,9 @@ mod tests {
             .id()
     }
 
-    fn spawn_loose_parcel(world: &mut World, position: Position, weight: f32) -> Entity {
+    fn spawn_loose_parcel(world: &mut World, weight: f32) -> Entity {
         world
             .spawn((
-                position,
                 Item,
                 CargoStats {
                     weight,
@@ -319,7 +183,7 @@ mod tests {
             },
             CarriedBy {
                 holder,
-                slot: CarrySlot::Back,
+                slot: CarrySlot::Chest,
             },
         ));
         world.spawn((
@@ -338,14 +202,27 @@ mod tests {
     }
 
     #[test]
-    fn pickup_succeeds_and_updates_relationships_and_cache() {
+    fn carried_parcels_lists_relationships_and_refreshes_cache() {
         let mut world = World::new();
         let holder = spawn_holder(&mut world, 0.0, 40.0);
-        let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
+        let parcel = spawn_loose_parcel(&mut world, 5.0);
+        world.entity_mut(parcel).insert((
+            CarriedBy {
+                holder,
+                slot: CarrySlot::Back,
+            },
+            ParcelState::CarriedBy(holder),
+        ));
 
-        pick_up_item(&mut world, holder, parcel, CarrySlot::Back)
-            .expect("pickup should succeed for a loose parcel within capacity");
-
+        let carried = carried_parcels(&mut world, holder);
+        assert_eq!(
+            carried,
+            vec![CarriedParcelEntry {
+                entity: parcel,
+                weight: 5.0
+            }]
+        );
+        assert!(refresh_cargo_cache(&mut world, holder));
         assert_eq!(
             world.get::<CarriedBy>(parcel).map(|carried| carried.holder),
             Some(holder)
@@ -366,80 +243,22 @@ mod tests {
     }
 
     #[test]
-    fn pickup_capacity_failure_does_not_mutate_state() {
+    fn refresh_cache_replaces_stale_weight_with_derived_load() {
         let mut world = World::new();
-        let holder = spawn_holder(&mut world, 0.0, 4.0);
-        let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
+        let holder = spawn_holder(&mut world, 99.0, 40.0);
+        let parcel = spawn_loose_parcel(&mut world, 5.0);
+        world.entity_mut(parcel).insert(CarriedBy {
+            holder,
+            slot: CarrySlot::Back,
+        });
 
-        assert_eq!(
-            pick_up_item(&mut world, holder, parcel, CarrySlot::Back),
-            Err(CargoError::CapacityExceeded)
-        );
-        assert!(world.get::<CarriedBy>(parcel).is_none());
-        assert_eq!(
-            *world
-                .get::<ParcelState>(parcel)
-                .expect("failed pickup should keep parcel state"),
-            ParcelState::Loose
-        );
+        assert!(refresh_cargo_cache(&mut world, holder));
         assert_eq!(
             world
                 .get::<Cargo>(holder)
                 .expect("holder should keep a Cargo component")
                 .current_weight,
-            0.0
-        );
-    }
-
-    #[test]
-    fn drop_succeeds_and_makes_item_loose_at_actor_position() {
-        let mut world = World::new();
-        let holder = spawn_holder(&mut world, 0.0, 40.0);
-        let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        pick_up_item(&mut world, holder, parcel, CarrySlot::Back)
-            .expect("pickup should succeed before testing drop");
-
-        drop_item(&mut world, holder, parcel, Position { x: 2, y: 3 })
-            .expect("drop should succeed for parcel carried by holder");
-
-        assert!(world.get::<CarriedBy>(parcel).is_none());
-        assert_eq!(
-            *world
-                .get::<ParcelState>(parcel)
-                .expect("dropped parcel should keep a ParcelState"),
-            ParcelState::Loose
-        );
-        assert_eq!(
-            *world
-                .get::<Position>(parcel)
-                .expect("dropped parcel should have a Position"),
-            Position { x: 2, y: 3 }
-        );
-        assert_eq!(
-            world
-                .get::<Cargo>(holder)
-                .expect("holder should keep a Cargo component")
-                .current_weight,
-            0.0
-        );
-    }
-
-    #[test]
-    fn drop_fails_when_item_is_not_carried_by_holder() {
-        let mut world = World::new();
-        let holder = spawn_holder(&mut world, 0.0, 40.0);
-        let other_holder = spawn_holder(&mut world, 0.0, 40.0);
-        let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        pick_up_item(&mut world, other_holder, parcel, CarrySlot::Back)
-            .expect("pickup by other holder should set up drop failure");
-
-        assert_eq!(
-            drop_item(&mut world, holder, parcel, Position { x: 2, y: 3 }),
-            Err(CargoError::NotCarriedByHolder)
-        );
-        assert_eq!(
-            world.get::<CarriedBy>(parcel).map(|carried| carried.holder),
-            Some(other_holder)
+            5.0
         );
     }
 }
