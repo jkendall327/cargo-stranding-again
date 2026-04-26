@@ -217,7 +217,7 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
   - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
   - [x] Drop a carried parcel at the player position using the temporary parcel/cargo model.
   - [ ] Pick up a loose item at the actor position.
-  - [ ] Fail clearly if the slot is occupied.
+  - [x] Fail clearly if the slot is occupied.
   - [ ] Fail clearly if weight/volume capacity is exceeded.
   - [ ] Drop carried item at the actor position.
 - [ ] Add derived load calculation.
