@@ -98,6 +98,7 @@ pub enum CargoError {
     MissingItem,
     MissingContainer,
     NotLoose,
+    NotAtActorPosition,
     NotCarriedByHolder,
     SlotOccupied,
     CapacityExceeded,

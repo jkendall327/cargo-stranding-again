@@ -63,6 +63,7 @@ type ItemState<'a> = (
 #[derive(SystemParam)]
 pub struct PickupCargoQueries<'w, 's> {
     cargo: Query<'w, 's, &'static Cargo>,
+    positions: Query<'w, 's, &'static Position>,
     items: Query<'w, 's, ItemState<'static>>,
     direct_carries: Query<'w, 's, (Entity, &'static CargoStats, &'static CarriedBy)>,
     containers: Query<'w, 's, (&'static Container, &'static CarriedBy)>,
@@ -278,6 +279,18 @@ fn validate_pickup(
         || !parcel_can_be_picked_up_by(parcel_state, request.actor)
     {
         return Err(CargoError::NotLoose);
+    }
+
+    let actor_position = queries
+        .positions
+        .get(request.actor)
+        .map_err(|_| CargoError::NotAtActorPosition)?;
+    let item_position = queries
+        .positions
+        .get(request.item)
+        .map_err(|_| CargoError::NotAtActorPosition)?;
+    if actor_position != item_position {
+        return Err(CargoError::NotAtActorPosition);
     }
 
     match request.target {
@@ -541,7 +554,11 @@ mod tests {
 
     fn spawn_actor(world: &mut World, max_weight: f32) -> Entity {
         world
-            .spawn((Cargo { max_weight }, ActionEnergy::default()))
+            .spawn((
+                Position { x: 1, y: 1 },
+                Cargo { max_weight },
+                ActionEnergy::default(),
+            ))
             .id()
     }
 
@@ -708,6 +725,37 @@ mod tests {
     }
 
     #[test]
+    fn remote_pickup_fails_without_mutation_or_energy_spend() {
+        let mut world = World::new();
+        init_cargo_resources(&mut world);
+        let actor = spawn_actor(&mut world, 40.0);
+        let parcel = spawn_loose_parcel(&mut world, Position { x: 3, y: 1 }, 5.0);
+        world
+            .resource_mut::<Messages<PickUpRequest>>()
+            .write(PickUpRequest {
+                actor,
+                item: parcel,
+                target: CargoTarget::Slot(CarrySlot::Back),
+            });
+
+        cargo_schedule().run(&mut world);
+
+        assert!(world.get::<CarriedBy>(parcel).is_none());
+        assert_eq!(
+            world.get::<Position>(parcel).copied(),
+            Some(Position { x: 3, y: 1 })
+        );
+        assert_eq!(derived_load(&mut world, actor), 0.0);
+        assert_eq!(
+            world
+                .get::<ActionEnergy>(actor)
+                .expect("actor should keep energy")
+                .ready_at,
+            0
+        );
+    }
+
+    #[test]
     fn occupied_slot_pickup_fails_without_mutation_or_energy_spend() {
         let mut world = World::new();
         init_cargo_resources(&mut world);
@@ -749,7 +797,7 @@ mod tests {
         init_cargo_resources(&mut world);
         let actor = spawn_actor(&mut world, 40.0);
         let first = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        let second = spawn_loose_parcel(&mut world, Position { x: 2, y: 1 }, 5.0);
+        let second = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
         {
             let mut pickup_requests = world.resource_mut::<Messages<PickUpRequest>>();
             pickup_requests.write(PickUpRequest {

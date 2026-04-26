@@ -207,26 +207,26 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
   - [x] `Item`
   - [x] `CargoStats { weight, volume }`
   - [ ] Optional later: dimensions, fragility, stackability, rigidity, wetness, value.
-- [ ] Define carrying/container relationship data.
-  - [ ] `CarrySlot` enum: `HandLeft`, `HandRight`, `Back`, `Hip`, `Chest`, `Container(Entity)` or similar.
+- [x] Define carrying/container relationship data.
+  - [x] `CarrySlot` enum: `HandLeft`, `HandRight`, `Back`, `Hip`, `Chest`, `Container(Entity)` or similar.
   - [x] `CarriedBy { holder: Entity, slot: CarrySlot }`
   - [x] `Container { volume_capacity, weight_capacity }`
   - [x] `ContainedIn { container: Entity }`
 - [ ] Rework `CargoParcel` / `ParcelState` to use the new item relationship model.
-- [ ] Add pickup/drop systems.
+- [x] Add pickup/drop systems.
   - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
   - [x] Drop a carried parcel at the player position using the temporary parcel/cargo model.
-  - [ ] Pick up a loose item at the actor position.
+  - [x] Pick up a loose item at the actor position.
   - [x] Fail clearly if the slot is occupied.
   - [x] Fail clearly if weight/volume capacity is exceeded.
-  - [ ] Drop carried item at the actor position.
-- [ ] Add derived load calculation.
+  - [x] Drop carried item at the actor position.
+- [x] Add derived load calculation.
   - [x] Compute total carried weight per actor.
   - [x] Cache it into the existing `Cargo` component or replace `Cargo` with `Load`.
   - [x] Ensure movement uses derived load, not hand-edited totals.
 - [x] Update NPC porter jobs to use pickup/drop relationship transitions instead of mutating `cargo.current_weight`.
 - [ ] Render loose, assigned, and carried items clearly.
-- [ ] Add tests.
+- [x] Add tests.
   - [x] Cannot pick up oversized cargo.
   - [x] Cannot put cargo into a full container.
   - [x] Dropping temporary parcel cargo makes it loose at the actor position.
@@ -234,9 +234,9 @@ Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model wit
 
 Notes:
 
-- Existing parcel state is in `src/components.rs::ParcelState`.
-- Temporary player inventory currently lists `CargoParcel` entities with `ParcelState::CarriedBy(player)`.
-- Existing porter job code directly adds/subtracts parcel weight from `Cargo`.
+- `ParcelState` still mixes delivery/job state with physical looseness. Rework it so item relationships are the only source of physical location truth.
+- Player inventory now lists carried `CargoParcel` entities via `CarriedBy` / `ContainedIn` relationships.
+- Porter jobs now use pickup/delivery relationship transitions rather than mutating cached cargo weight.
 - This is probably the largest near-term domain change.
 
 ## 5. Data-Driven Terrain And Items
