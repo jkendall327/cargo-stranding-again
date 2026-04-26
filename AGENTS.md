@@ -8,6 +8,20 @@ If I mentioned numbers like '#3' I'm referring to stuff here.
 
 You can use your `mcp__rust_lsp_plugin__` tool for some AST-style codebase manipulation stuff, probably cheaper than burning tokens doing things the hard way. Don't feel pressured to use it, but be aware it exists.
 
+## Philosophy
+
+I want this to be a 'serious' codebase with legs, so I want to do things the 'right way', even if it means a bit more upfront complexity.
+
+I'm not very familiar with ECS patterns, so warn me if we're falling into antipatterns there.
+
+I want to follow the old rougelike philosophy of 'the player follows the same rules as everyone else', as much as possible. So systems should, if appropriate, not be scoped just to the player, but theoretically be available to all entities.
+
+This entails that systems should be scoped tightly in a nice ECS way, rather than big 'do everything' blobs.
+
+I want to stay somewhat familiar with the code. To that end, leave *some* doc comments on important structs and functions.
+You don't need to go crazy with it; I don't care about having line-by-line logic explained.
+I care more about the 'why' of it all.
+
 ## Codebase Tour
 
 Start with `src/app.rs` when you want the frame-level story. `Game::run_frame`
@@ -63,17 +77,7 @@ Run the normal verification suite with one command:
 - `cargo run --bin xtask -- verify`
 
 That command runs `cargo fmt --check`, `cargo clippy --all-targets`, and
-`cargo test`. Use the individual commands below when you need a narrower or
-faster check:
-
-- `cargo fmt --check`
-- `cargo check`
-- `cargo clippy`
-- `cargo clippy --all-targets`
-- `cargo test`
-- `cargo run`
-
-But by default, please run the full suite every time!
+`cargo test`.
 
 Headless scenario smoke tests are separate from normal verification:
 
