@@ -1,11 +1,12 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{self as cargo_model, Cargo, CargoParcel, CarrySlot, ParcelState};
+use crate::cargo::{Cargo, CargoParcel, CarrySlot, ParcelState};
 use crate::components::*;
-use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, ITEM_ACTION_ENERGY_COST};
+use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
-use crate::resources::{DeliveryStats, Direction, EnergyTimeline};
+use crate::resources::{Direction, EnergyTimeline};
+use crate::systems::{DeliverRequest, PickUpRequest};
 
 pub fn update_porter_action_interest(
     mut commands: Commands,
@@ -80,28 +81,17 @@ pub fn porter_jobs(world: &mut World) {
                 }
 
                 if snapshot.position == parcel_position {
-                    if cargo_model::pick_up_item(
-                        world,
-                        porter_entity,
-                        parcel_entity,
-                        CarrySlot::Back,
-                    )
-                    .is_err()
-                    {
-                        clear_porter_job(world, porter_entity);
-                        continue;
-                    }
-                    set_porter_job(
-                        world,
-                        porter_entity,
-                        JobPhase::GoToDepot,
-                        Some(parcel_entity),
-                    );
-                    spend_porter_energy(world, porter_entity, now, ITEM_ACTION_ENERGY_COST);
+                    world
+                        .resource_mut::<Messages<PickUpRequest>>()
+                        .write(PickUpRequest {
+                            actor: porter_entity,
+                            item: parcel_entity,
+                            slot: CarrySlot::Back,
+                        });
                     tracing::debug!(
                         porter = ?porter_entity,
-                        cargo = cargo_model::cargo_load(world, porter_entity).unwrap_or(0.0),
-                        "porter picked up parcel"
+                        item = ?parcel_entity,
+                        "porter pickup requested"
                     );
                     continue;
                 }
@@ -111,20 +101,16 @@ pub fn porter_jobs(world: &mut World) {
             JobPhase::GoToDepot => {
                 let depot = map.depot_coord();
                 if TileCoord::from(snapshot.position) == depot {
-                    if cargo_model::deliver_carried_parcel(world, porter_entity, parcel_entity)
-                        .is_err()
-                    {
-                        clear_porter_job(world, porter_entity);
-                        continue;
-                    }
-                    world.resource_mut::<DeliveryStats>().delivered_parcels += 1;
-                    set_porter_job(world, porter_entity, JobPhase::Done, None);
-                    spend_porter_energy(world, porter_entity, now, ITEM_ACTION_ENERGY_COST);
-                    let delivered_parcels = world.resource::<DeliveryStats>().delivered_parcels;
+                    world
+                        .resource_mut::<Messages<DeliverRequest>>()
+                        .write(DeliverRequest {
+                            actor: porter_entity,
+                            item: parcel_entity,
+                        });
                     tracing::info!(
                         porter = ?porter_entity,
-                        delivered_parcels,
-                        "porter delivered parcel"
+                        item = ?parcel_entity,
+                        "porter delivery requested"
                     );
                     continue;
                 }
@@ -184,12 +170,6 @@ fn set_porter_job(
     if let Some(mut job) = world.get_mut::<AssignedJob>(porter_entity) {
         job.phase = phase;
         job.parcel = parcel;
-    }
-}
-
-fn spend_porter_energy(world: &mut World, porter_entity: Entity, now: u64, cost: u32) {
-    if let Some(mut energy) = world.get_mut::<ActionEnergy>(porter_entity) {
-        energy.spend(now, cost);
     }
 }
 
@@ -277,6 +257,41 @@ fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
 mod tests {
     use super::*;
     use crate::cargo::{CargoStats, CarriedBy, Item};
+    use crate::energy::ITEM_ACTION_ENERGY_COST;
+    use crate::resources::DeliveryStats;
+    use crate::systems::{
+        handle_cargo_action_results, maintain_cargo_messages, refresh_changed_cargo_caches,
+        resolve_cargo_requests, CargoActionResult, CargoChanged, DeliverRequest, DropRequest,
+        PickUpRequest,
+    };
+    use bevy_ecs::schedule::ApplyDeferred;
+
+    fn init_cargo_message_resources(world: &mut World) {
+        world.insert_resource(crate::resources::InventoryMenuState::default());
+        world.init_resource::<Messages<PickUpRequest>>();
+        world.init_resource::<Messages<DropRequest>>();
+        world.init_resource::<Messages<DeliverRequest>>();
+        world.init_resource::<Messages<CargoChanged>>();
+        world.init_resource::<Messages<CargoActionResult>>();
+    }
+
+    fn porter_job_schedule() -> Schedule {
+        let mut schedule = Schedule::default();
+        schedule.add_systems(
+            (
+                update_porter_action_interest,
+                assign_porter_jobs,
+                porter_jobs,
+                resolve_cargo_requests,
+                ApplyDeferred,
+                refresh_changed_cargo_caches,
+                handle_cargo_action_results,
+                maintain_cargo_messages,
+            )
+                .chain(),
+        );
+        schedule
+    }
 
     fn spawn_test_porter(world: &mut World, id: usize, position: Position) {
         world.spawn((
@@ -347,6 +362,7 @@ mod tests {
         world.insert_resource(crate::resources::SimulationClock { turn: 0 });
         world.insert_resource(DeliveryStats::default());
         world.insert_resource(EnergyTimeline::default());
+        init_cargo_message_resources(&mut world);
         spawn_test_porter(
             &mut world,
             0,
@@ -363,15 +379,7 @@ mod tests {
             },
         );
 
-        let mut schedule = Schedule::default();
-        schedule.add_systems(
-            (
-                update_porter_action_interest,
-                assign_porter_jobs,
-                porter_jobs,
-            )
-                .chain(),
-        );
+        let mut schedule = porter_job_schedule();
         for _ in 0..12 {
             schedule.run(&mut world);
             world.resource_mut::<EnergyTimeline>().now += 100;
@@ -403,6 +411,7 @@ mod tests {
         world.insert_resource(map);
         world.insert_resource(DeliveryStats::default());
         world.insert_resource(EnergyTimeline::default());
+        init_cargo_message_resources(&mut world);
         spawn_test_porter(
             &mut world,
             0,
@@ -419,15 +428,7 @@ mod tests {
             },
         );
 
-        let mut schedule = Schedule::default();
-        schedule.add_systems(
-            (
-                update_porter_action_interest,
-                assign_porter_jobs,
-                porter_jobs,
-            )
-                .chain(),
-        );
+        let mut schedule = porter_job_schedule();
         schedule.run(&mut world);
 
         assert_eq!(world.resource::<DeliveryStats>().delivered_parcels, 0);

@@ -1,70 +1,75 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{cargo_load, carried_parcels, drop_carried_parcel};
+use crate::cargo::{CargoParcel, CarriedBy};
 use crate::components::{ActionEnergy, Player, Position};
-use crate::energy::ITEM_ACTION_ENERGY_COST;
 use crate::resources::{EnergyTimeline, InventoryAction, InventoryIntent, InventoryMenuState};
+use crate::systems::DropRequest;
 
-pub fn inventory_actions(world: &mut World) {
-    let action = world.resource_mut::<InventoryIntent>().action.take();
+pub fn inventory_actions(
+    timeline: Res<EnergyTimeline>,
+    mut intent: ResMut<InventoryIntent>,
+    mut inventory_menu: ResMut<InventoryMenuState>,
+    player: Query<(Entity, &Position, &ActionEnergy), With<Player>>,
+    carried_parcels: Query<(Entity, &CarriedBy), With<CargoParcel>>,
+    mut drop_requests: MessageWriter<DropRequest>,
+) {
+    let action = intent.action.take();
     let Some(action) = action else {
         return;
     };
 
     match action {
         InventoryAction::DropSelected => {
-            drop_selected_inventory_parcel(world);
+            let Some(player) = player.iter().next() else {
+                return;
+            };
+            drop_selected_inventory_parcel(
+                &timeline,
+                &mut inventory_menu,
+                player,
+                &carried_parcels,
+                &mut drop_requests,
+            );
         }
     }
 }
 
-fn drop_selected_inventory_parcel(world: &mut World) -> bool {
-    let Some((player_entity, player_position)) = ready_player(world) else {
+fn drop_selected_inventory_parcel(
+    timeline: &EnergyTimeline,
+    inventory_menu: &mut InventoryMenuState,
+    player: (Entity, &Position, &ActionEnergy),
+    carried_parcels: &Query<(Entity, &CarriedBy), With<CargoParcel>>,
+    drop_requests: &mut MessageWriter<DropRequest>,
+) -> bool {
+    let (player_entity, player_position, energy) = player;
+    if !energy.is_ready(timeline.now) {
         return false;
-    };
+    }
 
-    let parcels = carried_parcels(world, player_entity);
-    world
-        .resource_mut::<InventoryMenuState>()
-        .clamp_to_item_count(parcels.len());
+    let mut parcels = carried_parcels
+        .iter()
+        .filter_map(|(entity, carried_by)| (carried_by.holder == player_entity).then_some(entity))
+        .collect::<Vec<_>>();
+    parcels.sort_by_key(|entity| entity.to_bits());
+    inventory_menu.clamp_to_item_count(parcels.len());
 
-    let selected_index = world.resource::<InventoryMenuState>().selected_index();
+    let selected_index = inventory_menu.selected_index();
     let Some(parcel) = parcels.get(selected_index).copied() else {
         return false;
     };
 
-    if !drop_carried_parcel(world, player_entity, parcel.entity, player_position) {
-        return false;
-    }
-
-    let now = world.resource::<EnergyTimeline>().now;
-    let cargo_weight = {
-        let Some(mut energy) = world.get_mut::<ActionEnergy>(player_entity) else {
-            return false;
-        };
-
-        energy.spend(now, ITEM_ACTION_ENERGY_COST);
-        cargo_load(world, player_entity).unwrap_or(0.0)
-    };
-
-    world
-        .resource_mut::<InventoryMenuState>()
-        .clamp_to_item_count(parcels.len().saturating_sub(1));
+    drop_requests.write(DropRequest {
+        actor: player_entity,
+        item: parcel,
+        at: *player_position,
+    });
 
     tracing::info!(
         x = player_position.x,
         y = player_position.y,
-        cargo = cargo_weight,
-        "player dropped parcel"
+        item = ?parcel,
+        "player drop requested"
     );
 
     true
-}
-
-fn ready_player(world: &mut World) -> Option<(Entity, Position)> {
-    let now = world.resource::<EnergyTimeline>().now;
-    let mut player_query =
-        world.query_filtered::<(Entity, &Position, &ActionEnergy), With<Player>>();
-    let (entity, position, energy) = player_query.iter(world).next()?;
-    energy.is_ready(now).then_some((entity, *position))
 }

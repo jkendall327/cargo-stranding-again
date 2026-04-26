@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod cargo;
 pub mod inventory;
 pub mod menu;
 pub mod movement_mode;
@@ -7,6 +8,11 @@ pub mod timeline;
 pub mod wait;
 
 pub use agents::{assign_porter_jobs, porter_jobs, update_porter_action_interest};
+pub use cargo::{
+    handle_cargo_action_results, maintain_cargo_messages, refresh_changed_cargo_caches,
+    resolve_cargo_requests, CargoAction, CargoActionResult, CargoChanged, DeliverRequest,
+    DropRequest, PickUpRequest,
+};
 pub use inventory::inventory_actions;
 pub use menu::menu_navigation;
 pub use movement_mode::{

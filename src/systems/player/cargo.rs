@@ -3,6 +3,7 @@ use bevy_ecs::prelude::*;
 use crate::cargo as cargo_model;
 use crate::components::{Player, Position};
 use crate::resources::CargoLossRisk;
+use crate::systems::DropRequest;
 
 pub fn reset_cargo_loss_risk(mut cargo_loss_risk: ResMut<CargoLossRisk>) {
     cargo_loss_risk.reset();
@@ -18,16 +19,23 @@ pub fn resolve_cargo_loss_risk(world: &mut World) {
         return;
     };
 
-    let dropped = cargo_model::drop_carried_parcels(world, player_entity, player_position);
-    let cargo_weight = cargo_model::cargo_load(world, player_entity).unwrap_or(0.0);
+    let parcels = cargo_model::carried_parcels(world, player_entity);
+    for parcel in &parcels {
+        world
+            .resource_mut::<Messages<DropRequest>>()
+            .write(DropRequest {
+                actor: player_entity,
+                item: parcel.entity,
+                at: player_position,
+            });
+    }
 
-    if dropped > 0 {
+    if !parcels.is_empty() {
         tracing::info!(
-            dropped,
+            dropped = parcels.len(),
             risk = cargo_loss_risk.amount,
             x = player_position.x,
             y = player_position.y,
-            cargo = cargo_weight,
             "player cargo spilled from accumulated action risk"
         );
     }

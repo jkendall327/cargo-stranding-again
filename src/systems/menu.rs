@@ -68,6 +68,12 @@ mod tests {
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
     use crate::simulation::SimulationRunner;
     use crate::systems::inventory::inventory_actions;
+    use crate::systems::{
+        handle_cargo_action_results, maintain_cargo_messages, refresh_changed_cargo_caches,
+        resolve_cargo_requests, CargoActionResult, CargoChanged, DeliverRequest, DropRequest,
+        PickUpRequest,
+    };
+    use bevy_ecs::schedule::ApplyDeferred;
 
     fn spawn_test_player(world: &mut World, position: Position) -> Entity {
         world
@@ -109,6 +115,13 @@ mod tests {
         world.insert_resource(PauseMenuState::default());
         world.insert_resource(InventoryMenuState::default());
         world.insert_resource(InventoryIntent::default());
+        world.insert_resource(EnergyTimeline::default());
+        world.insert_resource(crate::resources::DeliveryStats::default());
+        world.init_resource::<Messages<PickUpRequest>>();
+        world.init_resource::<Messages<DropRequest>>();
+        world.init_resource::<Messages<DeliverRequest>>();
+        world.init_resource::<Messages<CargoChanged>>();
+        world.init_resource::<Messages<CargoActionResult>>();
         world.insert_resource(MenuInputState {
             action: Some(action),
         });
@@ -116,7 +129,18 @@ mod tests {
 
     fn menu_with_inventory_resolution_schedule() -> Schedule {
         let mut schedule = Schedule::default();
-        schedule.add_systems((menu_navigation, inventory_actions).chain());
+        schedule.add_systems(
+            (
+                menu_navigation,
+                inventory_actions,
+                resolve_cargo_requests,
+                ApplyDeferred,
+                refresh_changed_cargo_caches,
+                handle_cargo_action_results,
+                maintain_cargo_messages,
+            )
+                .chain(),
+        );
         schedule
     }
 
