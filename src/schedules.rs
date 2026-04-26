@@ -8,7 +8,9 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
         (
             systems::reset_cargo_loss_risk,
             systems::open_inventory_from_player_intent,
-            systems::cycle_player_movement_mode,
+            systems::emit_player_cycle_movement_request,
+            systems::resolve_cycle_movement_requests,
+            systems::maintain_cycle_movement_requests,
             systems::pick_up_player_parcel_from_intent,
             systems::emit_player_wait_request,
             systems::resolve_wait_requests,

@@ -57,29 +57,6 @@ pub fn open_inventory_from_player_intent(
     tracing::debug!(carried_count, "opened inventory");
 }
 
-pub fn cycle_player_movement_mode(
-    intent: Res<PlayerIntent>,
-    timeline: Res<EnergyTimeline>,
-    mut player_query: Query<(&mut MovementState, &ActionEnergy), With<Player>>,
-) {
-    let Some(PlayerAction::CycleMovementMode) = intent.action else {
-        return;
-    };
-
-    let Ok((mut movement_state, energy)) = player_query.single_mut() else {
-        return;
-    };
-    if !energy.is_ready(timeline.now) {
-        return;
-    }
-
-    movement_state.cycle_mode();
-    tracing::info!(
-        mode = movement_state.mode.label(),
-        "player movement mode changed"
-    );
-}
-
 pub fn pick_up_player_parcel_from_intent(
     mut commands: Commands,
     intent: Res<PlayerIntent>,
@@ -231,7 +208,9 @@ mod tests {
     use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
     use crate::systems::{
-        emit_player_wait_request, maintain_wait_requests, resolve_wait_requests, WaitRequest,
+        emit_player_cycle_movement_request, emit_player_wait_request,
+        maintain_cycle_movement_requests, maintain_wait_requests, resolve_cycle_movement_requests,
+        resolve_wait_requests, CycleMovementRequest, WaitRequest,
     };
 
     fn insert_player_action_resources(world: &mut World, action: PlayerAction) {
@@ -243,6 +222,7 @@ mod tests {
         world.insert_resource(GameScreen::Playing);
         world.insert_resource(InventoryMenuState::default());
         world.init_resource::<Messages<WaitRequest>>();
+        world.init_resource::<Messages<CycleMovementRequest>>();
     }
 
     fn spawn_test_parcel(world: &mut World, position: Position) {
@@ -585,7 +565,14 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(cycle_player_movement_mode);
+        schedule.add_systems(
+            (
+                emit_player_cycle_movement_request,
+                resolve_cycle_movement_requests,
+                maintain_cycle_movement_requests,
+            )
+                .chain(),
+        );
         schedule.run(&mut world);
 
         let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
@@ -614,7 +601,14 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(cycle_player_movement_mode);
+        schedule.add_systems(
+            (
+                emit_player_cycle_movement_request,
+                resolve_cycle_movement_requests,
+                maintain_cycle_movement_requests,
+            )
+                .chain(),
+        );
         schedule.run(&mut world);
         schedule.run(&mut world);
 

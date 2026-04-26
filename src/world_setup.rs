@@ -11,7 +11,7 @@ use crate::resources::{
     Camera, CargoLossRisk, DeliveryStats, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
     InventoryMenuState, MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
 };
-use crate::systems::WaitRequest;
+use crate::systems::{CycleMovementRequest, WaitRequest};
 
 pub fn init_world(world: &mut World) {
     tracing::info!("initializing world");
@@ -31,6 +31,7 @@ pub fn init_world(world: &mut World) {
     world.insert_resource(SimulationClock { turn: 0 });
     world.insert_resource(DeliveryStats::default());
     world.init_resource::<Messages<WaitRequest>>();
+    world.init_resource::<Messages<CycleMovementRequest>>();
 
     let player_entity = world
         .spawn((

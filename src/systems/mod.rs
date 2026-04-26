@@ -1,6 +1,7 @@
 pub mod agents;
 pub mod inventory;
 pub mod menu;
+pub mod movement_mode;
 pub mod player;
 pub mod timeline;
 pub mod wait;
@@ -8,10 +9,13 @@ pub mod wait;
 pub use agents::{assign_porter_jobs, porter_jobs, update_porter_action_interest};
 pub use inventory::inventory_actions;
 pub use menu::menu_navigation;
+pub use movement_mode::{
+    emit_player_cycle_movement_request, maintain_cycle_movement_requests,
+    resolve_cycle_movement_requests, CycleMovementRequest,
+};
 pub use player::{
-    cycle_player_movement_mode, open_inventory_from_player_intent,
-    pick_up_player_parcel_from_intent, player_actions, reset_cargo_loss_risk,
-    resolve_cargo_loss_risk,
+    open_inventory_from_player_intent, pick_up_player_parcel_from_intent, player_actions,
+    reset_cargo_loss_risk, resolve_cargo_loss_risk,
 };
 pub use wait::{
     emit_player_wait_request, maintain_wait_requests, resolve_wait_requests, WaitRequest,
