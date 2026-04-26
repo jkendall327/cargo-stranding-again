@@ -7,6 +7,7 @@ pub(crate) fn player_action_phase_schedule() -> Schedule {
     schedule.add_systems(
         (
             systems::reset_cargo_loss_risk,
+            systems::cycle_player_movement_mode,
             systems::player_actions,
             systems::resolve_cargo_loss_risk,
         )

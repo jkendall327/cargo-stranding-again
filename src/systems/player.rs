@@ -29,6 +29,29 @@ type PlayerActionItem<'a> = (
 
 const WAIT_STAMINA_RECOVERY: f32 = 3.0;
 
+pub fn cycle_player_movement_mode(
+    intent: Res<PlayerIntent>,
+    timeline: Res<EnergyTimeline>,
+    mut player_query: Query<(&mut MovementState, &ActionEnergy), With<Player>>,
+) {
+    let Some(PlayerAction::CycleMovementMode) = intent.action else {
+        return;
+    };
+
+    let Ok((mut movement_state, energy)) = player_query.single_mut() else {
+        return;
+    };
+    if !energy.is_ready(timeline.now) {
+        return;
+    }
+
+    movement_state.cycle_mode();
+    tracing::info!(
+        mode = movement_state.mode.label(),
+        "player movement mode changed"
+    );
+}
+
 pub fn player_actions(world: &mut World) {
     let now = world.resource::<EnergyTimeline>().now;
     let Some(action) = world.resource::<PlayerIntent>().action else {
@@ -56,6 +79,10 @@ pub fn player_actions(world: &mut World) {
         return;
     }
 
+    if action == PlayerAction::CycleMovementMode {
+        return;
+    }
+
     let map = world.resource::<Map>().clone();
     let timeline = *world.resource::<EnergyTimeline>();
     let mut cargo_loss_risk = *world.resource::<CargoLossRisk>();
@@ -67,7 +94,7 @@ pub fn player_actions(world: &mut World) {
         mut velocity,
         mut stamina,
         cargo,
-        mut movement_state,
+        movement_state,
         mut momentum,
         mut energy,
     )) = player_query.single_mut(world)
@@ -118,13 +145,7 @@ pub fn player_actions(world: &mut World) {
             *world.resource_mut::<CargoLossRisk>() = cargo_loss_risk;
         }
         PlayerAction::PickUp => {}
-        PlayerAction::CycleMovementMode => {
-            movement_state.cycle_mode();
-            tracing::info!(
-                mode = movement_state.mode.label(),
-                "player movement mode changed"
-            );
-        }
+        PlayerAction::CycleMovementMode => {}
         PlayerAction::OpenInventory => {}
         PlayerAction::Wait => {}
     }
@@ -536,7 +557,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(cycle_player_movement_mode);
         schedule.run(&mut world);
 
         let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
@@ -565,7 +586,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 35.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(cycle_player_movement_mode);
         schedule.run(&mut world);
         schedule.run(&mut world);
 
