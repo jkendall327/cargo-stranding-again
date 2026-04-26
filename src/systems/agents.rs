@@ -1,7 +1,8 @@
 use bevy_ecs::prelude::*;
 
 use crate::cargo::{
-    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, Container, ParcelState,
+    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, ContainedIn, Container,
+    ParcelState,
 };
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
@@ -10,14 +11,26 @@ use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
 use crate::resources::{Direction, EnergyTimeline};
 use crate::systems::{DeliverRequest, PickUpRequest};
 
+type ParcelCarryState<'a> = (
+    &'a ParcelState,
+    Option<&'a CarriedBy>,
+    Option<&'a ContainedIn>,
+);
+type AssignableParcelState<'a> = (
+    Entity,
+    &'a mut ParcelState,
+    Option<&'a CarriedBy>,
+    Option<&'a ContainedIn>,
+);
+
 pub fn update_porter_action_interest(
     mut commands: Commands,
-    parcels: Query<&ParcelState, With<CargoParcel>>,
+    parcels: Query<ParcelCarryState, With<CargoParcel>>,
     porters: Query<(Entity, &AssignedJob), With<Porter>>,
 ) {
-    let has_loose_parcel = parcels
-        .iter()
-        .any(|state| matches!(*state, ParcelState::Loose));
+    let has_loose_parcel = parcels.iter().any(|(state, carried_by, contained_in)| {
+        matches!(*state, ParcelState::Loose) && carried_by.is_none() && contained_in.is_none()
+    });
 
     for (porter_entity, job) in &porters {
         let has_active_job =
@@ -31,7 +44,7 @@ pub fn update_porter_action_interest(
 }
 
 pub fn assign_porter_jobs(
-    mut parcels: Query<(Entity, &mut ParcelState), With<CargoParcel>>,
+    mut parcels: Query<AssignableParcelState, With<CargoParcel>>,
     mut porters: Query<(Entity, &mut AssignedJob), With<Porter>>,
 ) {
     for (porter_entity, mut job) in &mut porters {
@@ -39,9 +52,14 @@ pub fn assign_porter_jobs(
             continue;
         }
 
-        if let Some((parcel_entity, mut state)) = parcels
-            .iter_mut()
-            .find(|(_, state)| matches!(**state, ParcelState::Loose))
+        if let Some((parcel_entity, mut state, _, _)) =
+            parcels
+                .iter_mut()
+                .find(|(_, state, carried_by, contained_in)| {
+                    matches!(**state, ParcelState::Loose)
+                        && carried_by.is_none()
+                        && contained_in.is_none()
+                })
         {
             *state = ParcelState::AssignedTo(porter_entity);
             job.parcel = Some(parcel_entity);
@@ -69,14 +87,15 @@ pub fn porter_jobs(world: &mut World) {
         let Some(parcel_entity) = snapshot.job.parcel else {
             continue;
         };
-        let Some((parcel_position, parcel_state)) = parcel_snapshot(world, parcel_entity) else {
-            clear_porter_job(world, porter_entity);
-            continue;
-        };
-
         match snapshot.job.phase {
             JobPhase::FindParcel | JobPhase::Done => {}
             JobPhase::GoToParcel => {
+                let Some((parcel_position, parcel_state)) = parcel_snapshot(world, parcel_entity)
+                else {
+                    clear_porter_job(world, porter_entity);
+                    continue;
+                };
+
                 if parcel_state != ParcelState::AssignedTo(porter_entity) {
                     clear_porter_job(world, porter_entity);
                     continue;
@@ -459,11 +478,6 @@ mod tests {
         schedule.run(&mut world);
 
         assert_eq!(world.resource::<DeliveryStats>().delivered_parcels, 0);
-
-        let mut parcel_query = world.query::<&ParcelState>();
-        assert!(parcel_query
-            .iter(&world)
-            .any(|state| matches!(state, ParcelState::CarriedBy(_))));
 
         let mut carried_query = world.query::<&CarriedBy>();
         assert_eq!(carried_query.iter(&world).count(), 1);

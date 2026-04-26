@@ -99,7 +99,7 @@ mod tests {
                     slot: CarrySlot::Back,
                 },
                 CargoParcel,
-                ParcelState::CarriedBy(holder),
+                ParcelState::Loose,
             ))
             .id()
     }

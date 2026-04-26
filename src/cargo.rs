@@ -69,7 +69,6 @@ pub struct CargoParcel;
 pub enum ParcelState {
     Loose,
     AssignedTo(Entity),
-    CarriedBy(Entity),
     Delivered,
 }
 
@@ -400,13 +399,10 @@ mod tests {
         let mut world = World::new();
         let holder = spawn_holder(&mut world, 40.0);
         let parcel = spawn_loose_parcel(&mut world, 5.0);
-        world.entity_mut(parcel).insert((
-            CarriedBy {
-                holder,
-                slot: CarrySlot::Back,
-            },
-            ParcelState::CarriedBy(holder),
-        ));
+        world.entity_mut(parcel).insert((CarriedBy {
+            holder,
+            slot: CarrySlot::Back,
+        },));
 
         let carried = carried_parcels(&mut world, holder);
         assert_eq!(
@@ -424,7 +420,7 @@ mod tests {
             *world
                 .get::<ParcelState>(parcel)
                 .expect("picked-up parcel should keep a ParcelState"),
-            ParcelState::CarriedBy(holder)
+            ParcelState::Loose
         );
         assert_eq!(derived_load(&mut world, holder), 5.0);
     }

@@ -31,7 +31,12 @@ type PlayerActionItem<'a> = (
 );
 
 type PlayerPickupItem<'a> = (Entity, &'a Position, &'a ParcelState);
-type PlayerPickupFilter = (With<Item>, With<CargoParcel>, Without<CarriedBy>);
+type PlayerPickupFilter = (
+    With<Item>,
+    With<CargoParcel>,
+    Without<CarriedBy>,
+    Without<ContainedIn>,
+);
 
 pub fn open_inventory_from_player_intent(
     intent: Res<PlayerIntent>,
@@ -270,7 +275,7 @@ mod tests {
                 slot: CarrySlot::Back,
             },
             CargoParcel,
-            ParcelState::CarriedBy(holder),
+            ParcelState::Loose,
         ));
     }
 
@@ -721,11 +726,8 @@ mod tests {
             .expect("test player should exist");
         assert_eq!(derived_load(&mut world, player), 5.0);
 
-        let mut parcel_query = world.query::<&ParcelState>();
-        let carried_parcels = parcel_query
-            .iter(&world)
-            .filter(|state| matches!(state, ParcelState::CarriedBy(_)))
-            .count();
+        let mut parcel_query = world.query_filtered::<&CarriedBy, With<CargoParcel>>();
+        let carried_parcels = parcel_query.iter(&world).count();
         assert_eq!(carried_parcels, 1);
     }
 

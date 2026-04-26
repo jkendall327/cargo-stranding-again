@@ -1,7 +1,9 @@
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
-use crate::cargo::{derived_load, CargoParcel, CargoStats, Item, ParcelState};
+use crate::cargo::{
+    derived_load, CargoParcel, CargoStats, CarriedBy, ContainedIn, Container, Item, ParcelState,
+};
 use crate::components::{
     AssignedJob, AutonomousActor, Momentum, MovementState, Player, Porter, Position, Stamina,
     WantsAction,
@@ -127,12 +129,27 @@ impl HeadlessSnapshot {
         let mut loose_parcels = 0;
         let mut assigned_parcels = 0;
         let mut carried_parcels = 0;
-        let mut parcel_query = world.query_filtered::<&ParcelState, With<CargoParcel>>();
-        for state in parcel_query.iter(world) {
+        let mut parcel_query = world.query_filtered::<
+            (&ParcelState, Option<&CarriedBy>, Option<&ContainedIn>),
+            With<CargoParcel>,
+        >();
+        let mut containers = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
+        let carried_containers = containers
+            .iter(world)
+            .map(|(container, _)| container)
+            .collect::<Vec<_>>();
+        for (state, carried_by, contained_in) in parcel_query.iter(world) {
+            if carried_by.is_some()
+                || contained_in.is_some_and(|contained_in| {
+                    carried_containers.contains(&contained_in.container)
+                })
+            {
+                carried_parcels += 1;
+                continue;
+            }
             match state {
                 ParcelState::Loose => loose_parcels += 1,
                 ParcelState::AssignedTo(_) => assigned_parcels += 1,
-                ParcelState::CarriedBy(_) => carried_parcels += 1,
                 ParcelState::Delivered => {}
             }
         }
@@ -366,7 +383,7 @@ fn mark_parcels(world: &mut World, camera: Camera, rows: &mut [String]) {
         let glyph = match state {
             ParcelState::Loose => '*',
             ParcelState::AssignedTo(_) => '+',
-            ParcelState::CarriedBy(_) | ParcelState::Delivered => continue,
+            ParcelState::Delivered => continue,
         };
         mark_position(camera, rows, *position, glyph);
     }
