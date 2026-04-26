@@ -10,5 +10,5 @@ pub use menu::menu_navigation;
 pub use player::{
     cycle_player_movement_mode, open_inventory_from_player_intent,
     pick_up_player_parcel_from_intent, player_actions, reset_cargo_loss_risk,
-    resolve_cargo_loss_risk,
+    resolve_cargo_loss_risk, wait_from_player_intent,
 };

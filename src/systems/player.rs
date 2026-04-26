@@ -155,6 +155,44 @@ pub fn pick_up_player_parcel_from_intent(
     );
 }
 
+pub fn wait_from_player_intent(
+    intent: Res<PlayerIntent>,
+    timeline: Res<EnergyTimeline>,
+    mut player_query: Query<
+        (
+            &mut Velocity,
+            &mut Stamina,
+            &mut Momentum,
+            &mut ActionEnergy,
+        ),
+        With<Player>,
+    >,
+) {
+    let Some(PlayerAction::Wait) = intent.action else {
+        return;
+    };
+
+    let Ok((mut velocity, mut stamina, mut momentum, mut energy)) = player_query.single_mut()
+    else {
+        return;
+    };
+    if !energy.is_ready(timeline.now) {
+        return;
+    }
+
+    velocity.dx = 0;
+    velocity.dy = 0;
+    stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
+    *momentum = wait_momentum((*momentum).into()).into();
+    energy.spend(timeline.now, WAIT_ENERGY_COST);
+    tracing::debug!(
+        ready_at = energy.ready_at,
+        stamina = stamina.current,
+        momentum = momentum.amount,
+        "player waited"
+    );
+}
+
 pub fn player_actions(world: &mut World) {
     let now = world.resource::<EnergyTimeline>().now;
     let Some(action) = world.resource::<PlayerIntent>().action else {
@@ -163,7 +201,10 @@ pub fn player_actions(world: &mut World) {
 
     if matches!(
         action,
-        PlayerAction::OpenInventory | PlayerAction::PickUp | PlayerAction::CycleMovementMode
+        PlayerAction::OpenInventory
+            | PlayerAction::PickUp
+            | PlayerAction::CycleMovementMode
+            | PlayerAction::Wait
     ) {
         return;
     }
@@ -195,19 +236,6 @@ pub fn player_actions(world: &mut World) {
     velocity.dy = 0;
 
     tracing::debug!(?action, now, "processing player action");
-
-    if action == PlayerAction::Wait {
-        stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
-        *momentum = wait_momentum((*momentum).into()).into();
-        energy.spend(now, WAIT_ENERGY_COST);
-        tracing::debug!(
-            ready_at = energy.ready_at,
-            stamina = stamina.current,
-            momentum = momentum.amount,
-            "player waited"
-        );
-        return;
-    }
 
     match action {
         PlayerAction::Move(direction) => {
@@ -451,7 +479,7 @@ mod tests {
         spawn_test_player(&mut world, Position { x: 0, y: 0 }, 10.0);
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(wait_from_player_intent);
         schedule.run(&mut world);
 
         let mut energy_query = world.query_filtered::<&ActionEnergy, With<Player>>();
@@ -490,7 +518,7 @@ mod tests {
         };
 
         let mut schedule = Schedule::default();
-        schedule.add_systems(player_actions);
+        schedule.add_systems(wait_from_player_intent);
         schedule.run(&mut world);
 
         let momentum = world
