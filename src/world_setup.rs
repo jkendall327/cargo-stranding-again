@@ -1,6 +1,8 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{Cargo, CargoParcel, ParcelState};
+use crate::cargo::{
+    refresh_cargo_cache, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelState,
+};
 use crate::components::*;
 use crate::energy::ActionEnergy;
 use crate::input::KeyBindings;
@@ -28,23 +30,38 @@ pub fn init_world(world: &mut World) {
     world.insert_resource(SimulationClock { turn: 0 });
     world.insert_resource(DeliveryStats::default());
 
+    let player_entity = world
+        .spawn((
+            Actor,
+            Player,
+            Position { x: 6, y: 6 },
+            Velocity::default(),
+            Cargo {
+                current_weight: 0.0,
+                max_weight: 40.0,
+            },
+            Stamina {
+                current: 35.0,
+                max: 35.0,
+            },
+            MovementState::default(),
+            Momentum::default(),
+            ActionEnergy::default(),
+        ))
+        .id();
+
     world.spawn((
-        Actor,
-        Player,
-        Position { x: 6, y: 6 },
-        Velocity::default(),
-        Cargo {
-            current_weight: 12.0,
-            max_weight: 40.0,
+        Item,
+        CargoStats {
+            weight: 12.0,
+            volume: 0.0,
         },
-        Stamina {
-            current: 35.0,
-            max: 35.0,
+        CarriedBy {
+            holder: player_entity,
+            slot: CarrySlot::Back,
         },
-        MovementState::default(),
-        Momentum::default(),
-        ActionEnergy::default(),
     ));
+    refresh_cargo_cache(world, player_entity);
 
     for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {
         world.spawn((
@@ -75,6 +92,11 @@ pub fn init_world(world: &mut World) {
     ] {
         world.spawn((
             Position { x, y },
+            Item,
+            CargoStats {
+                weight,
+                volume: 1.0,
+            },
             CargoParcel { weight },
             ParcelState::Loose,
         ));

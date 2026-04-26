@@ -1,20 +1,11 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{Cargo, CargoParcel, ParcelState};
+use crate::cargo::{self as cargo_model, Cargo, CargoParcel, CarrySlot, ParcelState};
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST, ITEM_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
 use crate::resources::{DeliveryStats, Direction, EnergyTimeline};
-
-type PorterJobItem<'a> = (
-    Entity,
-    &'a mut Position,
-    &'a mut Velocity,
-    &'a mut Cargo,
-    &'a mut AssignedJob,
-    &'a mut ActionEnergy,
-);
 
 pub fn update_porter_action_interest(
     mut commands: Commands,
@@ -59,103 +50,175 @@ pub fn assign_porter_jobs(
     }
 }
 
-pub fn porter_jobs(
-    map: Res<Map>,
-    timeline: Res<EnergyTimeline>,
-    mut delivery_stats: ResMut<DeliveryStats>,
-    mut porters: Query<PorterJobItem, (With<Porter>, With<WantsAction>)>,
-    mut parcels: Query<(&Position, &CargoParcel, &mut ParcelState), Without<Porter>>,
-) {
-    let map = &*map;
-    let now = timeline.now;
-    for (porter_entity, mut position, mut velocity, mut cargo, mut job, mut energy) in &mut porters
-    {
-        velocity.dx = 0;
-        velocity.dy = 0;
+pub fn porter_jobs(world: &mut World) {
+    let map = world.resource::<Map>().clone();
+    let now = world.resource::<EnergyTimeline>().now;
+    let porter_entities = {
+        let mut query = world.query_filtered::<Entity, (With<Porter>, With<WantsAction>)>();
+        query.iter(world).collect::<Vec<_>>()
+    };
 
-        if !energy.is_ready(now) {
-            continue;
-        }
-
-        let Some(parcel_entity) = job.parcel else {
-            continue;
-        };
-        let Ok((parcel_position, parcel, mut parcel_state)) = parcels.get_mut(parcel_entity) else {
-            job.phase = JobPhase::FindParcel;
-            job.parcel = None;
+    for porter_entity in porter_entities {
+        let Some(snapshot) = ready_porter_snapshot(world, porter_entity, now) else {
             continue;
         };
 
-        match job.phase {
+        let Some(parcel_entity) = snapshot.job.parcel else {
+            continue;
+        };
+        let Some((parcel_position, parcel_state)) = parcel_snapshot(world, parcel_entity) else {
+            clear_porter_job(world, porter_entity);
+            continue;
+        };
+
+        match snapshot.job.phase {
             JobPhase::FindParcel | JobPhase::Done => {}
             JobPhase::GoToParcel => {
-                if *parcel_state != ParcelState::AssignedTo(porter_entity) {
-                    job.phase = JobPhase::FindParcel;
-                    job.parcel = None;
+                if parcel_state != ParcelState::AssignedTo(porter_entity) {
+                    clear_porter_job(world, porter_entity);
                     continue;
                 }
 
-                if position.x == parcel_position.x && position.y == parcel_position.y {
-                    *parcel_state = ParcelState::CarriedBy(porter_entity);
-                    cargo.current_weight += parcel.weight;
-                    job.phase = JobPhase::GoToDepot;
-                    energy.spend(now, ITEM_ACTION_ENERGY_COST);
+                if snapshot.position == parcel_position {
+                    if cargo_model::pick_up_item(
+                        world,
+                        porter_entity,
+                        parcel_entity,
+                        CarrySlot::Back,
+                    )
+                    .is_err()
+                    {
+                        clear_porter_job(world, porter_entity);
+                        continue;
+                    }
+                    set_porter_job(
+                        world,
+                        porter_entity,
+                        JobPhase::GoToDepot,
+                        Some(parcel_entity),
+                    );
+                    spend_porter_energy(world, porter_entity, now, ITEM_ACTION_ENERGY_COST);
                     tracing::debug!(
                         porter = ?porter_entity,
-                        cargo = cargo.current_weight,
+                        cargo = cargo_model::cargo_load(world, porter_entity).unwrap_or(0.0),
                         "porter picked up parcel"
                     );
                     continue;
                 }
 
-                if let Some(moved) = greedy_step(
-                    map,
-                    porter_entity,
-                    &mut position,
-                    cargo.current_weight,
-                    cargo.max_weight,
-                    *parcel_position,
-                ) {
-                    velocity.dx = moved.actual_delta.0;
-                    velocity.dy = moved.actual_delta.1;
-                    energy.spend(now, moved.energy_cost);
-                } else {
-                    energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
-                }
+                move_porter_toward(world, &map, porter_entity, parcel_position, now);
             }
             JobPhase::GoToDepot => {
                 let depot = map.depot_coord();
-                if TileCoord::from(*position) == depot {
-                    *parcel_state = ParcelState::Delivered;
-                    cargo.current_weight = (cargo.current_weight - parcel.weight).max(0.0);
-                    delivery_stats.delivered_parcels += 1;
-                    job.phase = JobPhase::Done;
-                    job.parcel = None;
-                    energy.spend(now, ITEM_ACTION_ENERGY_COST);
+                if TileCoord::from(snapshot.position) == depot {
+                    if cargo_model::deliver_carried_parcel(world, porter_entity, parcel_entity)
+                        .is_err()
+                    {
+                        clear_porter_job(world, porter_entity);
+                        continue;
+                    }
+                    world.resource_mut::<DeliveryStats>().delivered_parcels += 1;
+                    set_porter_job(world, porter_entity, JobPhase::Done, None);
+                    spend_porter_energy(world, porter_entity, now, ITEM_ACTION_ENERGY_COST);
+                    let delivered_parcels = world.resource::<DeliveryStats>().delivered_parcels;
                     tracing::info!(
                         porter = ?porter_entity,
-                        delivered_parcels = delivery_stats.delivered_parcels,
+                        delivered_parcels,
                         "porter delivered parcel"
                     );
                     continue;
                 }
 
-                if let Some(moved) = greedy_step(
-                    map,
-                    porter_entity,
-                    &mut position,
-                    cargo.current_weight,
-                    cargo.max_weight,
-                    Position::from(depot),
-                ) {
-                    velocity.dx = moved.actual_delta.0;
-                    velocity.dy = moved.actual_delta.1;
-                    energy.spend(now, moved.energy_cost);
-                } else {
-                    energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
-                }
+                move_porter_toward(world, &map, porter_entity, Position::from(depot), now);
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PorterSnapshot {
+    position: Position,
+    job: AssignedJob,
+}
+
+fn ready_porter_snapshot(
+    world: &mut World,
+    porter_entity: Entity,
+    now: u64,
+) -> Option<PorterSnapshot> {
+    let mut query = world.query::<(
+        &Position,
+        &mut Velocity,
+        &AssignedJob,
+        &ActionEnergy,
+        &Porter,
+    )>();
+    let (position, mut velocity, job, energy, _) = query.get_mut(world, porter_entity).ok()?;
+    if !energy.is_ready(now) {
+        return None;
+    }
+    velocity.dx = 0;
+    velocity.dy = 0;
+    Some(PorterSnapshot {
+        position: *position,
+        job: *job,
+    })
+}
+
+fn parcel_snapshot(world: &mut World, parcel_entity: Entity) -> Option<(Position, ParcelState)> {
+    let mut query = world.query::<(&Position, &ParcelState, &CargoParcel)>();
+    let (position, state, _) = query.get(world, parcel_entity).ok()?;
+    Some((*position, *state))
+}
+
+fn clear_porter_job(world: &mut World, porter_entity: Entity) {
+    set_porter_job(world, porter_entity, JobPhase::FindParcel, None);
+}
+
+fn set_porter_job(
+    world: &mut World,
+    porter_entity: Entity,
+    phase: JobPhase,
+    parcel: Option<Entity>,
+) {
+    if let Some(mut job) = world.get_mut::<AssignedJob>(porter_entity) {
+        job.phase = phase;
+        job.parcel = parcel;
+    }
+}
+
+fn spend_porter_energy(world: &mut World, porter_entity: Entity, now: u64, cost: u32) {
+    if let Some(mut energy) = world.get_mut::<ActionEnergy>(porter_entity) {
+        energy.spend(now, cost);
+    }
+}
+
+fn move_porter_toward(
+    world: &mut World,
+    map: &Map,
+    porter_entity: Entity,
+    target: Position,
+    now: u64,
+) {
+    let mut query = world.query::<(&mut Position, &mut Velocity, &Cargo, &mut ActionEnergy)>();
+    let Ok((mut position, mut velocity, cargo, mut energy)) = query.get_mut(world, porter_entity)
+    else {
+        return;
+    };
+
+    if let Some(moved) = greedy_step(
+        map,
+        porter_entity,
+        &mut position,
+        cargo.current_weight,
+        cargo.max_weight,
+        target,
+    ) {
+        velocity.dx = moved.actual_delta.0;
+        velocity.dy = moved.actual_delta.1;
+        energy.spend(now, moved.energy_cost);
+    } else {
+        energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
     }
 }
 
@@ -213,6 +276,7 @@ fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cargo::{CargoStats, CarriedBy, Item};
 
     fn spawn_test_porter(world: &mut World, id: usize, position: Position) {
         world.spawn((
@@ -235,7 +299,16 @@ mod tests {
     }
 
     fn spawn_test_parcel(world: &mut World, position: Position) {
-        world.spawn((position, CargoParcel { weight: 5.0 }, ParcelState::Loose));
+        world.spawn((
+            position,
+            Item,
+            CargoStats {
+                weight: 5.0,
+                volume: 1.0,
+            },
+            CargoParcel { weight: 5.0 },
+            ParcelState::Loose,
+        ));
     }
 
     #[test]
@@ -363,6 +436,9 @@ mod tests {
         assert!(parcel_query
             .iter(&world)
             .any(|state| matches!(state, ParcelState::CarriedBy(_))));
+
+        let mut carried_query = world.query::<&CarriedBy>();
+        assert_eq!(carried_query.iter(&world).count(), 1);
 
         let mut porter_query =
             world.query_filtered::<(&AssignedJob, &ActionEnergy), With<Porter>>();

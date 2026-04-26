@@ -1,10 +1,9 @@
 use bevy_ecs::prelude::*;
-use bevy_ecs::system::SystemParam;
 
 mod cargo;
 mod movement;
 
-use crate::cargo::{Cargo, CargoParcel, ParcelState};
+use crate::cargo::{self as cargo_model, Cargo, CarrySlot, ParcelState};
 use crate::components::*;
 use crate::energy::{ActionEnergy, ITEM_ACTION_ENERGY_COST, WAIT_ENERGY_COST};
 use crate::map::Map;
@@ -15,7 +14,6 @@ use crate::resources::{
 
 pub use cargo::{reset_cargo_loss_risk, resolve_cargo_loss_risk};
 
-use self::cargo::{carried_parcel_count, pick_up_loose_parcel};
 use self::movement::{try_move_player, PlayerMovement};
 
 type PlayerActionItem<'a> = (
@@ -29,36 +27,50 @@ type PlayerActionItem<'a> = (
     &'a mut ActionEnergy,
 );
 
-type PlayerParcelItem<'a> = (Entity, &'a Position, &'a CargoParcel, &'a mut ParcelState);
-
-#[derive(SystemParam)]
-pub struct PlayerActionParams<'w, 's> {
-    intent: Res<'w, PlayerIntent>,
-    timeline: Res<'w, EnergyTimeline>,
-    map: Res<'w, Map>,
-    screen: ResMut<'w, GameScreen>,
-    inventory_menu: ResMut<'w, InventoryMenuState>,
-    cargo_loss_risk: ResMut<'w, CargoLossRisk>,
-    player: Query<'w, 's, PlayerActionItem<'static>, With<Player>>,
-    parcels: Query<'w, 's, PlayerParcelItem<'static>, Without<Player>>,
-}
-
 const WAIT_STAMINA_RECOVERY: f32 = 3.0;
 
-pub fn player_actions(mut params: PlayerActionParams) {
-    let now = params.timeline.now;
+pub fn player_actions(world: &mut World) {
+    let now = world.resource::<EnergyTimeline>().now;
+    let Some(action) = world.resource::<PlayerIntent>().action else {
+        return;
+    };
 
-    let map = &*params.map;
+    if action == PlayerAction::OpenInventory {
+        let Some(entity) = ready_player_entity(world, now) else {
+            return;
+        };
+        let carried_count = cargo_model::carried_parcel_count(world, entity);
+        world
+            .resource_mut::<InventoryMenuState>()
+            .clamp_to_item_count(carried_count);
+        *world.resource_mut::<GameScreen>() = GameScreen::InventoryMenu;
+        tracing::debug!(carried_count, "opened inventory");
+        return;
+    }
+
+    if action == PlayerAction::PickUp {
+        let Some((entity, position)) = ready_player_position_and_clear_velocity(world, now) else {
+            return;
+        };
+        pick_up_player_parcel(world, entity, position, now);
+        return;
+    }
+
+    let map = world.resource::<Map>().clone();
+    let timeline = *world.resource::<EnergyTimeline>();
+    let mut cargo_loss_risk = *world.resource::<CargoLossRisk>();
+
+    let mut player_query = world.query_filtered::<PlayerActionItem, With<Player>>();
     let Ok((
         entity,
         mut position,
         mut velocity,
         mut stamina,
-        mut cargo,
+        cargo,
         mut movement_state,
         mut momentum,
         mut energy,
-    )) = params.player.single_mut()
+    )) = player_query.single_mut(world)
     else {
         return;
     };
@@ -70,19 +82,7 @@ pub fn player_actions(mut params: PlayerActionParams) {
     velocity.dx = 0;
     velocity.dy = 0;
 
-    let Some(action) = params.intent.action else {
-        return;
-    };
-
     tracing::debug!(?action, now, "processing player action");
-
-    if action == PlayerAction::OpenInventory {
-        let carried_count = carried_parcel_count(entity, &params.parcels);
-        params.inventory_menu.clamp_to_item_count(carried_count);
-        *params.screen = GameScreen::InventoryMenu;
-        tracing::debug!(carried_count, "opened inventory");
-        return;
-    }
 
     if action == PlayerAction::Wait {
         stamina.current = (stamina.current + WAIT_STAMINA_RECOVERY).min(stamina.max);
@@ -111,28 +111,13 @@ pub fn player_actions(mut params: PlayerActionParams) {
                     energy: &mut energy,
                 },
                 direction,
-                map,
-                &params.timeline,
-                &mut params.cargo_loss_risk,
+                &map,
+                &timeline,
+                &mut cargo_loss_risk,
             );
+            *world.resource_mut::<CargoLossRisk>() = cargo_loss_risk;
         }
-        PlayerAction::PickUp => {
-            if pick_up_loose_parcel(entity, *position, &mut cargo, &mut params.parcels) {
-                energy.spend(now, ITEM_ACTION_ENERGY_COST);
-                tracing::info!(
-                    x = position.x,
-                    y = position.y,
-                    cargo = cargo.current_weight,
-                    "player picked up parcel"
-                );
-            } else {
-                tracing::debug!(
-                    x = position.x,
-                    y = position.y,
-                    "player pickup found no parcel"
-                );
-            }
-        }
+        PlayerAction::PickUp => {}
         PlayerAction::CycleMovementMode => {
             movement_state.cycle_mode();
             tracing::info!(
@@ -145,9 +130,73 @@ pub fn player_actions(mut params: PlayerActionParams) {
     }
 }
 
+fn ready_player_entity(world: &mut World, now: u64) -> Option<Entity> {
+    let mut player_query = world.query_filtered::<(Entity, &ActionEnergy), With<Player>>();
+    let (entity, energy) = player_query.iter(world).next()?;
+    energy.is_ready(now).then_some(entity)
+}
+
+fn ready_player_position_and_clear_velocity(
+    world: &mut World,
+    now: u64,
+) -> Option<(Entity, Position)> {
+    let mut player_query =
+        world.query_filtered::<(Entity, &Position, &mut Velocity, &ActionEnergy), With<Player>>();
+    let (entity, position, mut velocity, energy) = player_query.iter_mut(world).next()?;
+    if !energy.is_ready(now) {
+        return None;
+    }
+    velocity.dx = 0;
+    velocity.dy = 0;
+    Some((entity, *position))
+}
+
+fn pick_up_player_parcel(world: &mut World, holder: Entity, holder_position: Position, now: u64) {
+    let parcel = {
+        let mut parcels = world.query::<(Entity, &Position, &ParcelState)>();
+        parcels
+            .iter(world)
+            .find(|(_, position, state)| {
+                **position == holder_position && **state == ParcelState::Loose
+            })
+            .map(|(entity, _, _)| entity)
+    };
+
+    let Some(parcel) = parcel else {
+        tracing::debug!(
+            x = holder_position.x,
+            y = holder_position.y,
+            "player pickup found no parcel"
+        );
+        return;
+    };
+
+    if cargo_model::pick_up_item(world, holder, parcel, CarrySlot::Back).is_err() {
+        tracing::debug!(
+            x = holder_position.x,
+            y = holder_position.y,
+            "player pickup failed"
+        );
+        return;
+    }
+
+    let Some(mut energy) = world.get_mut::<ActionEnergy>(holder) else {
+        return;
+    };
+    energy.spend(now, ITEM_ACTION_ENERGY_COST);
+    let cargo_weight = cargo_model::cargo_load(world, holder).unwrap_or(0.0);
+    tracing::info!(
+        x = holder_position.x,
+        y = holder_position.y,
+        cargo = cargo_weight,
+        "player picked up parcel"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cargo::{CargoParcel, CargoStats, CarriedBy, Item};
     use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
 
@@ -162,15 +211,38 @@ mod tests {
     }
 
     fn spawn_test_parcel(world: &mut World, position: Position) {
-        world.spawn((position, CargoParcel { weight: 5.0 }, ParcelState::Loose));
+        spawn_test_parcel_with_weight(world, position, 5.0);
+    }
+
+    fn spawn_test_parcel_with_weight(world: &mut World, position: Position, weight: f32) {
+        world.spawn((
+            position,
+            Item,
+            CargoStats {
+                weight,
+                volume: 1.0,
+            },
+            CargoParcel { weight },
+            ParcelState::Loose,
+        ));
     }
 
     fn spawn_carried_test_parcel(world: &mut World, holder: Entity, position: Position) {
         world.spawn((
             position,
+            Item,
+            CargoStats {
+                weight: 5.0,
+                volume: 1.0,
+            },
+            CarriedBy {
+                holder,
+                slot: CarrySlot::Back,
+            },
             CargoParcel { weight: 5.0 },
             ParcelState::CarriedBy(holder),
         ));
+        cargo_model::refresh_cargo_cache(world, holder);
     }
 
     fn spawn_test_player(world: &mut World, position: Position, stamina: f32) -> Entity {
@@ -393,12 +465,6 @@ mod tests {
         world.insert_resource(map);
         insert_player_action_resources(&mut world, PlayerAction::Move(Direction::South));
         let player = spawn_test_player(&mut world, start, 35.0);
-        {
-            let mut cargo = world
-                .get_mut::<Cargo>(player)
-                .expect("test player should have cargo");
-            cargo.current_weight = 5.0;
-        }
         *world
             .get_mut::<Momentum>(player)
             .expect("test player should have momentum") = Momentum {
@@ -441,12 +507,6 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(CargoLossRisk { amount: 100 });
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
-        {
-            let mut cargo = world
-                .get_mut::<Cargo>(player)
-                .expect("test player should have cargo");
-            cargo.current_weight = 5.0;
-        }
         spawn_carried_test_parcel(&mut world, player, Position { x: 0, y: 0 });
 
         let mut schedule = Schedule::default();
@@ -589,5 +649,32 @@ mod tests {
             .next()
             .expect("test player should exist");
         assert_eq!(energy.ready_at, 0);
+    }
+
+    #[test]
+    fn failed_oversized_pickup_does_not_consume_turn() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        insert_player_action_resources(&mut world, PlayerAction::PickUp);
+        let player = spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
+        spawn_test_parcel_with_weight(&mut world, Position { x: 2, y: 2 }, 45.0);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(player_actions);
+        schedule.run(&mut world);
+
+        let energy = world
+            .get::<ActionEnergy>(player)
+            .expect("test player should have energy");
+        assert_eq!(energy.ready_at, 0);
+        let cargo = world
+            .get::<Cargo>(player)
+            .expect("test player should have cargo");
+        assert_eq!(cargo.current_weight, 0.0);
+
+        let mut parcel_query = world.query::<&ParcelState>();
+        assert!(parcel_query
+            .iter(&world)
+            .all(|state| matches!(state, ParcelState::Loose)));
     }
 }

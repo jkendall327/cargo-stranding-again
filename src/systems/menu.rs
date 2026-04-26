@@ -60,7 +60,10 @@ pub fn menu_navigation(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cargo::{Cargo, CargoParcel, ParcelState};
+    use crate::cargo::{
+        refresh_cargo_cache, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item,
+        ParcelState,
+    };
     use crate::components::{ActionEnergy, Player, Position};
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
     use crate::simulation::SimulationRunner;
@@ -72,7 +75,7 @@ mod tests {
                 Player,
                 position,
                 Cargo {
-                    current_weight: 5.0,
+                    current_weight: 0.0,
                     max_weight: 40.0,
                 },
                 ActionEnergy::default(),
@@ -81,13 +84,24 @@ mod tests {
     }
 
     fn spawn_carried_parcel(world: &mut World, holder: Entity, position: Position) -> Entity {
-        world
+        let parcel = world
             .spawn((
                 position,
+                Item,
+                CargoStats {
+                    weight: 5.0,
+                    volume: 1.0,
+                },
+                CarriedBy {
+                    holder,
+                    slot: CarrySlot::Back,
+                },
                 CargoParcel { weight: 5.0 },
                 ParcelState::CarriedBy(holder),
             ))
-            .id()
+            .id();
+        refresh_cargo_cache(world, holder);
+        parcel
     }
 
     fn setup_menu_world(world: &mut World, screen: GameScreen, action: MenuAction) {
