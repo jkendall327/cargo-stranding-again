@@ -21,16 +21,6 @@ Dependency notes:
   - Use deterministic seeds for generated maps, parcel placement, weather rolls, and test fixtures.
   - Avoid thread-local randomness in simulation systems so headless runs stay reproducible.
 
-Already done:
-
-- [x] Raw key presses are mapped through `src/input.rs` `KeyBindings`.
-- [x] Gameplay and menu input have separate abstract actions.
-- [x] The frame loop writes compact `PlayerIntent` / `MenuInputState` resources.
-- [x] Turns only advance when a player action actually consumes a turn.
-- [x] The player has basic stamina and cargo-weight movement effects.
-- [x] NPC porters can reserve, pick up, and deliver simple cargo parcels.
-- [x] Inventory menu can list carried parcels and drop the selected parcel.
-
 ## North Star Architecture
 
 Evolve the prototype around this pipeline:
@@ -41,72 +31,17 @@ Raw input -> abstract intent/action -> movement/job/simulation consequences -> r
 
 Avoid growing one large "movement plus terrain plus stamina plus cargo plus weather plus NPC" system. Prefer small domain concepts and explicit phases.
 
-Potential future phases:
-
-```text
-Input Collection
-Menu / UI Handling
-Intent Resolution
-Movement Resolution
-Cargo / Balance Effects
-NPC Planning
-NPC Acting
-Environment / Weather
-Clock / Turn Advancement
-Cleanup
-```
-
 ## 1. Movement Resolver
 
 Goal: move player and NPC movement through shared movement-resolution code instead of player-only and agent-only movement logic.
 
-- [x] Add a movement domain module, likely `src/movement.rs`.
-- [x] Introduce shared movement request/result types.
-  - [x] `MovementRequest { entity, direction, mode }` or a non-entity helper shape usable in tests.
-  - [x] `MovementOutcome::Moved`, `Blocked`, `InsufficientStamina`, etc.
-  - [x] Include the actual `dx/dy`, target position, terrain, stamina delta, and turn/cooldown cost in the result.
-- [x] Introduce `MovementMode`.
-  - [x] Start with `Walking`.
-  - [x] Leave room for `Sprinting`, `Steady`, `Swimming`, `Climbing`, `Rappelling`, and `Falling`.
-  - [x] Do not build all modes until a feature uses them.
-- [x] Extract terrain/stamina/cargo movement calculation out of `systems::player_actions`.
-- [x] Make `systems::player_actions` consume `PlayerIntent` and call the shared resolver.
-- [x] Make `systems::porter_jobs` call the shared resolver or a shared passability/cost helper.
-- [x] Keep failed movement from consuming a turn.
-- [x] Add tests for the resolver itself.
-  - [x] Bounds blocked.
-  - [x] Water blocked.
-  - [x] Grass neutral.
-  - [x] Road restores stamina.
-  - [x] Mud/rock drain stamina.
-  - [x] Cargo load increases negative stamina costs.
-
-Notes for future Codex runs:
-
-- Current player action code lives in `src/systems.rs::player_actions`.
-- Porter stepping lives in `greedy_step` in `src/systems/agents.rs`.
-- Terrain stats currently live as methods on `src/map.rs::Terrain`.
-- Be careful with Rust borrow rules if the resolver needs map data plus mutable components; a pure helper returning a decision is probably easiest first.
+Status: done.
 
 ## 2. Expanded Player Actions
 
 Goal: grow `PlayerAction` deliberately without turning it into input-shaped movement again.
 
-- [ ] Add action variants only as systems exist to consume them.
-- [ ] Candidate variants:
-  - [x] Persistent movement posture via `CycleMovementMode` + `Move(Direction)`.
-  - [x] `Steady` movement mode as the slower, stamina-conserving opposite of sprinting.
-  - [x] `PickUp`
-  - [x] `Drop` via inventory menu confirm for temporary cargo parcels
-  - [ ] `Interact`
-  - [x] `OpenInventory`
-  - [ ] `AdjustBalance(BalanceShift)`
-- [x] Decide whether movement modes are selected by action (`Sprint(North)`) or by a persistent component (`MovementMode::Sprinting` plus `Move(North)`).
-- [x] Add a player movement-state component when the first non-walking mode needs persistence.
-- [x] Keep menu actions separate from gameplay actions.
-- [x] Keep contextual actions resolved after input, not inside keybinding lookup.
-- [x] Add a reusable menu selection state so new menus do not each grow one-off cursor logic.
-- [x] Add an inventory screen that pauses simulation and uses menu navigation actions.
+Status: foundations done. Can add more actions like Interact, AdjustBalance etc.
 
 ## 3. Action Energy Timeline
 
@@ -139,105 +74,13 @@ Design decisions:
   as the pacing boundary and use an explicit simulation runner for the custom
   timeline orchestration.
 
-Implementation tasks:
-
-- [x] Add an `ActionEnergy` component.
-  - [x] Track actor `ready_at` time plus last spent cost.
-  - [x] Decide whether actors start ready or accumulate energy from zero.
-  - [x] Keep values integer if possible for deterministic scheduling.
-- [x] Define action energy costs.
-  - [x] Walking movement baseline, e.g. `100`.
-  - [x] Sprinting movement cheaper than walking, e.g. `60`, before terrain/load modifiers.
-  - [x] Steady movement more expensive than walking, e.g. `135`, before terrain/load modifiers.
-  - [x] Wait/rest baseline.
-  - [x] Pickup/drop baseline.
-  - [x] Future interact/combat placeholders.
-- [x] Extend movement resolution to report `energy_cost`.
-  - [x] Keep `resolve_movement` single-tile and pure.
-  - [x] Apply terrain/load/movement-mode modifiers to energy cost.
-  - [x] Preserve stamina delta and passability behavior.
-- [x] Refactor turn advancement into an energy scheduler.
-  - [x] Replace or demote the current `TurnState { consumed }` heartbeat.
-  - [x] Add a scheduler resource or priority queue keyed by actor ready time.
-  - [x] Let the player act only when ready.
-  - [x] Let NPCs act according to the same energy rules.
-  - [x] Keep failed actions from spending energy for now.
-- [x] Update NPC porter movement to consume action energy instead of `StepCooldown`.
-  - [x] Remove or adapt `StepCooldown` once energy covers the same need.
-  - [x] Keep greedy pathing simple until pathfinding work starts.
-- [x] Update pickup/drop and wait/rest to spend action energy.
-  - [x] Successful pickup spends energy.
-  - [x] Failed pickup spends no energy for now.
-  - [x] Successful inventory drop spends energy.
-  - [x] Failed inventory drop spends no energy for now.
-  - [x] Wait/rest spends energy and restores stamina.
-- [x] Add UI/debug output.
-  - [x] Show player energy/ready state.
-  - [x] Show NPC energy/ready state in porter debug rows.
-  - [x] Show current movement posture.
-- [x] Add tests.
-  - [x] Sprinting movement costs less energy than walking.
-  - [x] Sprinting movement still costs more stamina than walking.
-  - [x] Steady movement costs more energy than walking.
-  - [x] Steady movement costs less stamina than walking on rough terrain.
-  - [x] Failed movement spends no energy.
-  - [x] Successful pickup spends energy.
-  - [x] Failed pickup spends no energy.
-  - [x] Successful inventory drop spends energy and updates the timeline.
-  - [x] Faster actor can act more often than slower actor over the same timeline.
-  - [x] NPC delivery still progresses under energy scheduling.
-
-Momentum tasks for after the energy timeline:
-
-- [x] Add a grid-friendly `Momentum` component.
-  - [x] Store direction plus amount, e.g. `Momentum { direction: Option<Direction>, amount: f32 }`.
-  - [x] Continuing straight increases or preserves momentum.
-  - [x] Slowing/stopping decays momentum.
-  - [x] Turning at high momentum increases stumble/fall risk later.
-- [x] Keep momentum risk-only at first.
-  - [x] Momentum should not force automatic carry-through movement in the first version.
-  - [ ] Later, high momentum may force carry-through if that becomes worth the complexity.
+Status: done.
 
 ## 4. Serious Cargo Model
 
 Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model with entity relationships, carry slots, and derived load totals.
 
-- [x] Remove cached cargo load from `Cargo`; derive load from item relationships.
-- [x] Define cargo/item components.
-  - [x] `Item`
-  - [x] `CargoStats { weight, volume }`
-  - [ ] Optional later: dimensions, fragility, stackability, rigidity, wetness, value.
-- [x] Define carrying/container relationship data.
-  - [x] `CarrySlot` enum: `HandLeft`, `HandRight`, `Back`, `Hip`, `Chest`, `Container(Entity)` or similar.
-  - [x] `CarriedBy { holder: Entity, slot: CarrySlot }`
-  - [x] `Container { volume_capacity, weight_capacity }`
-  - [x] `ContainedIn { container: Entity }`
-- [x] Rework `CargoParcel` / `ParcelDelivery` to use the new item relationship model.
-- [x] Add pickup/drop systems.
-  - [x] Pick up a loose parcel at the player position using the temporary parcel/cargo model.
-  - [x] Drop a carried parcel at the player position using the temporary parcel/cargo model.
-  - [x] Pick up a loose item at the actor position.
-  - [x] Fail clearly if the slot is occupied.
-  - [x] Fail clearly if weight/volume capacity is exceeded.
-  - [x] Drop carried item at the actor position.
-- [x] Add derived load calculation.
-  - [x] Compute total carried weight per actor.
-  - [x] Cache it into the existing `Cargo` component or replace `Cargo` with `Load`.
-  - [x] Ensure movement uses derived load, not hand-edited totals.
-- [x] Update NPC porter jobs to use pickup/drop relationship transitions instead of mutating `cargo.current_weight`.
-- [ ] Render loose, assigned, and carried items clearly.
-- [x] Add tests.
-  - [x] Cannot pick up oversized cargo.
-  - [x] Cannot put cargo into a full container.
-  - [x] Dropping temporary parcel cargo makes it loose at the actor position.
-  - [x] NPC delivery still increments delivered parcel count.
-
-Notes:
-
-- `ParcelDelivery` tracks delivery availability/reservation/completion only. Physical location is owned by `Position`, `CarriedBy`, and `ContainedIn`.
-- Player inventory now lists carried `CargoParcel` entities via `CarriedBy` / `ContainedIn` relationships.
-- Porter jobs now use pickup/delivery relationship transitions rather than mutating cached cargo weight.
-- This is probably the largest near-term domain change.
+Status: done.
 
 ## 5. Data-Driven Terrain And Items
 
@@ -435,39 +278,6 @@ Goal: add persistence before worldgen and cargo relationships become too large t
   - [ ] NPC positions/jobs
 - [ ] Add load path in startup/debug menu.
 - [ ] Add round-trip tests.
-
-## 12. Code Organization
-
-Goal: keep the project pleasant as it stops being tiny.
-
-- [ ] Split large domains into modules only when the code has real weight.
-  - [ ] `movement.rs`
-  - [ ] `cargo.rs`
-  - [ ] `jobs.rs`
-  - [ ] `terrain.rs` or `data.rs`
-  - [ ] `worldgen.rs`
-  - [ ] `save.rs`
-- [ ] Keep `components.rs` from becoming an unstructured dumping ground.
-  - [ ] Either group related components into modules or re-export from `components/mod.rs`.
-- [ ] Add schedule construction helpers once schedules become more complex.
-- [ ] Keep tests near the domain they verify.
-- [ ] Prefer pure helper functions for calculations that need lots of tests.
-
-## Suggested Implementation Order
-
-1. Extract shared movement resolution.
-2. Add `MovementMode::Walking` and prepare for sprint/steady/swim.
-3. Add the action energy timeline.
-4. Replace direct cargo-weight mutation with item/carry relationships.
-5. Update NPC porter jobs to use the cargo model.
-6. Add simple pathfinding for NPCs.
-7. Move terrain stats into data definitions.
-8. Add real options/keybinding UI and keybinding persistence.
-9. Add save/load for the current fixed world.
-10. Introduce chunk coordinate types and chunk-backed map storage.
-11. Add deterministic chunk generation.
-12. Add elevation/depth fields.
-13. Add momentum, balance, and weather systems once movement/cargo/world data have stable boundaries.
 
 ## Useful Guardrails
 
