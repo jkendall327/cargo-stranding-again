@@ -58,11 +58,25 @@ the real game, then exposes snapshots and ASCII views for smoke scenarios under
 
 ## Useful Commands
 
+Run the normal verification suite with one command:
+
+- `cargo run --bin xtask -- verify`
+
+That command runs `cargo fmt --check`, `cargo clippy --all-targets`, and
+`cargo test`. Use the individual commands below when you need a narrower or
+faster check:
+
 - `cargo fmt --check`
 - `cargo check`
 - `cargo clippy`
+- `cargo clippy --all-targets`
 - `cargo test`
 - `cargo run`
+
+But by default, please run the full suite every time!
+
+Headless scenario smoke tests are separate from normal verification:
+
 - `cargo run --bin headless -- <commands>`
 - `cargo run --bin headless -- all`
 

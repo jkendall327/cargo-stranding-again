@@ -442,7 +442,9 @@ mod tests {
 
         let mut porter_query =
             world.query_filtered::<(&AssignedJob, &ActionEnergy), With<Porter>>();
-        let (job, energy) = porter_query.single(&world).unwrap();
+        let (job, energy) = porter_query
+            .single(&world)
+            .expect("test setup should leave exactly one porter");
         assert!(matches!(job.phase, JobPhase::GoToDepot));
         assert_eq!(energy.ready_at, u64::from(ITEM_ACTION_ENERGY_COST));
     }

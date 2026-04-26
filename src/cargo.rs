@@ -162,7 +162,7 @@ pub fn can_pick_up_item(world: &mut World, holder: Entity, item: Entity) -> Resu
         .ok_or(CargoError::MissingItem)?
         .weight;
 
-    if !world.get::<Item>(item).is_some()
+    if world.get::<Item>(item).is_none()
         || world.get::<CarriedBy>(item).is_some()
         || !parcel_can_be_picked_up_by(world, holder, item)
     {
@@ -343,17 +343,26 @@ mod tests {
         let holder = spawn_holder(&mut world, 0.0, 40.0);
         let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
 
-        pick_up_item(&mut world, holder, parcel, CarrySlot::Back).unwrap();
+        pick_up_item(&mut world, holder, parcel, CarrySlot::Back)
+            .expect("pickup should succeed for a loose parcel within capacity");
 
         assert_eq!(
             world.get::<CarriedBy>(parcel).map(|carried| carried.holder),
             Some(holder)
         );
         assert_eq!(
-            *world.get::<ParcelState>(parcel).unwrap(),
+            *world
+                .get::<ParcelState>(parcel)
+                .expect("picked-up parcel should keep a ParcelState"),
             ParcelState::CarriedBy(holder)
         );
-        assert_eq!(world.get::<Cargo>(holder).unwrap().current_weight, 5.0);
+        assert_eq!(
+            world
+                .get::<Cargo>(holder)
+                .expect("holder should keep a Cargo component")
+                .current_weight,
+            5.0
+        );
     }
 
     #[test]
@@ -368,10 +377,18 @@ mod tests {
         );
         assert!(world.get::<CarriedBy>(parcel).is_none());
         assert_eq!(
-            *world.get::<ParcelState>(parcel).unwrap(),
+            *world
+                .get::<ParcelState>(parcel)
+                .expect("failed pickup should keep parcel state"),
             ParcelState::Loose
         );
-        assert_eq!(world.get::<Cargo>(holder).unwrap().current_weight, 0.0);
+        assert_eq!(
+            world
+                .get::<Cargo>(holder)
+                .expect("holder should keep a Cargo component")
+                .current_weight,
+            0.0
+        );
     }
 
     #[test]
@@ -379,20 +396,32 @@ mod tests {
         let mut world = World::new();
         let holder = spawn_holder(&mut world, 0.0, 40.0);
         let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        pick_up_item(&mut world, holder, parcel, CarrySlot::Back).unwrap();
+        pick_up_item(&mut world, holder, parcel, CarrySlot::Back)
+            .expect("pickup should succeed before testing drop");
 
-        drop_item(&mut world, holder, parcel, Position { x: 2, y: 3 }).unwrap();
+        drop_item(&mut world, holder, parcel, Position { x: 2, y: 3 })
+            .expect("drop should succeed for parcel carried by holder");
 
         assert!(world.get::<CarriedBy>(parcel).is_none());
         assert_eq!(
-            *world.get::<ParcelState>(parcel).unwrap(),
+            *world
+                .get::<ParcelState>(parcel)
+                .expect("dropped parcel should keep a ParcelState"),
             ParcelState::Loose
         );
         assert_eq!(
-            *world.get::<Position>(parcel).unwrap(),
+            *world
+                .get::<Position>(parcel)
+                .expect("dropped parcel should have a Position"),
             Position { x: 2, y: 3 }
         );
-        assert_eq!(world.get::<Cargo>(holder).unwrap().current_weight, 0.0);
+        assert_eq!(
+            world
+                .get::<Cargo>(holder)
+                .expect("holder should keep a Cargo component")
+                .current_weight,
+            0.0
+        );
     }
 
     #[test]
@@ -401,7 +430,8 @@ mod tests {
         let holder = spawn_holder(&mut world, 0.0, 40.0);
         let other_holder = spawn_holder(&mut world, 0.0, 40.0);
         let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        pick_up_item(&mut world, other_holder, parcel, CarrySlot::Back).unwrap();
+        pick_up_item(&mut world, other_holder, parcel, CarrySlot::Back)
+            .expect("pickup by other holder should set up drop failure");
 
         assert_eq!(
             drop_item(&mut world, holder, parcel, Position { x: 2, y: 3 }),
