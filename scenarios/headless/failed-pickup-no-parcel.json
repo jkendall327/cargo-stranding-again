@@ -1,0 +1,19 @@
+{
+  "name": "failed pickup with no parcel",
+  "commands": ["pickup"],
+  "expect": {
+    "turn": 0,
+    "timeline": 0,
+    "player_position": {
+      "x": 6,
+      "y": 6
+    },
+    "player_movement_mode": "walking",
+    "player_stamina": 35.0,
+    "player_cargo": 14.0,
+    "loose_parcels": 5,
+    "assigned_parcels": 0,
+    "carried_parcels": 0,
+    "delivered_parcels": 0
+  }
+}

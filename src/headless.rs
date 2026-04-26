@@ -1,8 +1,11 @@
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
-use crate::cargo::{Cargo, CargoParcel, ParcelState};
-use crate::components::{Momentum, MovementState, Player, Porter, Position, Stamina};
+use crate::cargo::{Cargo, CargoParcel, CargoStats, Item, ParcelState};
+use crate::components::{
+    AssignedJob, AutonomousActor, Momentum, MovementState, Player, Porter, Position, Stamina,
+    WantsAction,
+};
 use crate::map::{Map, TileCoord};
 use crate::resources::{
     Camera, DeliveryStats, Direction, EnergyTimeline, GameScreen, PlayerAction, PlayerIntent,
@@ -179,11 +182,32 @@ impl HeadlessCommand {
 pub struct HeadlessScenario {
     pub name: Option<String>,
     #[serde(default)]
+    pub setup: HeadlessScenarioSetup,
+    #[serde(default)]
     pub view: bool,
     #[serde(default)]
     pub commands: Vec<ScenarioCommand>,
     #[serde(default)]
     pub expect: HeadlessExpect,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+/// Optional world mutations applied before a JSON scenario starts running.
+pub struct HeadlessScenarioSetup {
+    #[serde(default)]
+    pub disable_porters: bool,
+    #[serde(default)]
+    pub loose_parcels: Vec<HeadlessLooseParcel>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+/// A loose parcel fixture spawned at either an absolute position or player offset.
+pub struct HeadlessLooseParcel {
+    pub weight: f32,
+    #[serde(default = "default_parcel_volume")]
+    pub volume: f32,
+    pub position: Option<ExpectedPosition>,
+    pub offset: Option<ExpectedPosition>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -270,6 +294,7 @@ pub fn run_scenario(
     scenario: &HeadlessScenario,
 ) -> Result<HeadlessScenarioReport, HeadlessScenarioError> {
     let mut game = HeadlessGame::new();
+    apply_scenario_setup(game.world_mut(), &scenario.setup);
     for command in scenario.commands.iter().flat_map(expand_command) {
         let Some(parsed) = HeadlessCommand::from_token(&command) else {
             return Err(HeadlessScenarioError::UnknownCommand { command });
@@ -378,6 +403,73 @@ fn expand_command(command: &ScenarioCommand) -> Vec<String> {
                 .collect()
         }
     }
+}
+
+fn apply_scenario_setup(world: &mut World, setup: &HeadlessScenarioSetup) {
+    if setup.disable_porters {
+        disable_porters(world);
+    }
+
+    for parcel in &setup.loose_parcels {
+        let Some(position) = parcel.position(world) else {
+            continue;
+        };
+        world.spawn((
+            position,
+            Item,
+            CargoStats {
+                weight: parcel.weight,
+                volume: parcel.volume,
+            },
+            CargoParcel {
+                weight: parcel.weight,
+            },
+            ParcelState::Loose,
+        ));
+    }
+}
+
+fn disable_porters(world: &mut World) {
+    let mut query = world.query_filtered::<Entity, With<Porter>>();
+    let porters = query.iter(world).collect::<Vec<_>>();
+    for porter in porters {
+        let mut entity = world.entity_mut(porter);
+        entity.remove::<Porter>();
+        entity.remove::<AutonomousActor>();
+        entity.remove::<WantsAction>();
+        entity.remove::<AssignedJob>();
+    }
+}
+
+impl HeadlessLooseParcel {
+    fn position(self, world: &mut World) -> Option<Position> {
+        if let Some(position) = self.position {
+            return Some(position.into());
+        }
+
+        let player_position = {
+            let mut query = world.query_filtered::<&Position, With<Player>>();
+            query.iter(world).next().copied()?
+        };
+        let offset = self.offset.unwrap_or(ExpectedPosition { x: 0, y: 0 });
+        Some(Position {
+            x: player_position.x + offset.x,
+            y: player_position.y + offset.y,
+        })
+    }
+}
+
+impl From<ExpectedPosition> for Position {
+    fn from(position: ExpectedPosition) -> Self {
+        Self {
+            x: position.x,
+            y: position.y,
+        }
+    }
+}
+
+fn default_parcel_volume() -> f32 {
+    1.0
 }
 
 impl HeadlessExpect {

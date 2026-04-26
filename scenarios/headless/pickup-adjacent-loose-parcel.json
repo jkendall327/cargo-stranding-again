@@ -1,0 +1,31 @@
+{
+  "name": "pick up adjacent loose parcel",
+  "setup": {
+    "disable_porters": true,
+    "loose_parcels": [
+      {
+        "offset": {
+          "x": 1,
+          "y": 0
+        },
+        "weight": 6.0
+      }
+    ]
+  },
+  "commands": ["east", "pickup"],
+  "expect": {
+    "turn": 2,
+    "timeline": 215,
+    "player_position": {
+      "x": 7,
+      "y": 6
+    },
+    "player_movement_mode": "walking",
+    "player_stamina": 35.0,
+    "player_cargo": 20.0,
+    "loose_parcels": 5,
+    "assigned_parcels": 0,
+    "carried_parcels": 1,
+    "delivered_parcels": 0
+  }
+}
