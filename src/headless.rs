@@ -422,9 +422,7 @@ fn apply_scenario_setup(world: &mut World, setup: &HeadlessScenarioSetup) {
                 weight: parcel.weight,
                 volume: parcel.volume,
             },
-            CargoParcel {
-                weight: parcel.weight,
-            },
+            CargoParcel,
             ParcelState::Loose,
         ));
     }

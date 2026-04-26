@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
-use crate::cargo::{derived_load, CargoParcel, ParcelState};
+use crate::cargo::{derived_load, CargoParcel, CargoStats, ParcelState};
 use crate::components::*;
 use crate::map::{Map, Terrain};
 use crate::render::layout::{
@@ -150,8 +150,8 @@ fn terrain_glyph(terrain: Terrain) -> &'static str {
 }
 
 fn draw_parcels(world: &mut World, camera: Camera) {
-    let mut query = world.query::<(&Position, &CargoParcel, &ParcelState)>();
-    for (position, parcel, state) in query.iter(world) {
+    let mut query = world.query::<(&Position, &CargoStats, &ParcelState, &CargoParcel)>();
+    for (position, stats, state, _) in query.iter(world) {
         if !matches!(state, ParcelState::Loose | ParcelState::AssignedTo(_)) {
             continue;
         }
@@ -168,7 +168,7 @@ fn draw_parcels(world: &mut World, camera: Camera) {
         };
         draw_rectangle(cx - 5.0, cy - 5.0, 10.0, 10.0, color);
         draw_text(
-            &format!("{:.0}", parcel.weight),
+            &format!("{:.0}", stats.weight),
             cx - 4.0,
             cy + 4.0,
             10.0,

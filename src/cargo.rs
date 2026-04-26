@@ -59,9 +59,11 @@ pub struct Cargo {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct CargoParcel {
-    pub weight: f32,
-}
+/// Marks an item as parcel-shaped delivery cargo.
+///
+/// Physical cargo properties live in `CargoStats`; this marker keeps delivery
+/// gameplay distinct from generic carry mechanics without duplicating weight.
+pub struct CargoParcel;
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParcelState {
@@ -128,19 +130,20 @@ pub fn carried_parcels(world: &mut World, holder: Entity) -> Vec<CarriedParcelEn
     let mut parcel_query = world.query::<(
         Entity,
         &CargoParcel,
+        &CargoStats,
         Option<&CarriedBy>,
         Option<&ContainedIn>,
     )>();
     let mut parcels = parcel_query
         .iter(world)
-        .filter_map(|(entity, parcel, carried_by, contained_in)| {
+        .filter_map(|(entity, _, stats, carried_by, contained_in)| {
             let carried_directly = carried_by.is_some_and(|carried_by| carried_by.holder == holder);
             let carried_in_container = contained_in
                 .is_some_and(|contained_in| carried_containers.contains(&contained_in.container));
             if carried_directly || carried_in_container {
                 Some(CarriedParcelEntry {
                     entity,
-                    weight: parcel.weight,
+                    weight: stats.weight,
                 })
             } else {
                 None
@@ -317,7 +320,7 @@ mod tests {
                     weight,
                     volume: 1.0,
                 },
-                CargoParcel { weight },
+                CargoParcel,
                 ParcelState::Loose,
             ))
             .id()

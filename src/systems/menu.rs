@@ -98,7 +98,7 @@ mod tests {
                     holder,
                     slot: CarrySlot::Back,
                 },
-                CargoParcel { weight: 5.0 },
+                CargoParcel,
                 ParcelState::CarriedBy(holder),
             ))
             .id()

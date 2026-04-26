@@ -564,7 +564,7 @@ mod tests {
                     weight,
                     volume: 1.0,
                 },
-                CargoParcel { weight },
+                CargoParcel,
                 ParcelState::Loose,
             ))
             .id()

@@ -252,7 +252,7 @@ mod tests {
                 weight,
                 volume: 1.0,
             },
-            CargoParcel { weight },
+            CargoParcel,
             ParcelState::Loose,
         ));
     }
@@ -269,7 +269,7 @@ mod tests {
                 holder,
                 slot: CarrySlot::Back,
             },
-            CargoParcel { weight: 5.0 },
+            CargoParcel,
             ParcelState::CarriedBy(holder),
         ));
     }

@@ -349,7 +349,7 @@ mod tests {
                 weight: 5.0,
                 volume: 1.0,
             },
-            CargoParcel { weight: 5.0 },
+            CargoParcel,
             ParcelState::Loose,
         ));
     }

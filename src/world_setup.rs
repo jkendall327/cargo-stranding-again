@@ -122,7 +122,7 @@ pub fn init_world(world: &mut World) {
                 weight,
                 volume: 1.0,
             },
-            CargoParcel { weight },
+            CargoParcel,
             ParcelState::Loose,
         ));
     }
