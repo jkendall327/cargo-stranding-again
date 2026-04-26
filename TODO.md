@@ -202,7 +202,7 @@ Momentum tasks for after the energy timeline:
 
 Goal: replace `Cargo { current_weight, max_weight }` as the core cargo model with entity relationships, carry slots, and derived load totals.
 
-- [x] Keep the current `Cargo` component temporarily as a compatibility/cache layer.
+- [x] Remove cached cargo load from `Cargo`; derive load from item relationships.
 - [x] Define cargo/item components.
   - [x] `Item`
   - [x] `CargoStats { weight, volume }`

@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
-use crate::cargo::{Cargo, CargoParcel, ParcelState};
+use crate::cargo::{derived_load, CargoParcel, ParcelState};
 use crate::components::*;
 use crate::map::{Map, Terrain};
 use crate::render::layout::{
@@ -178,13 +178,17 @@ fn draw_parcels(world: &mut World, camera: Camera) {
 }
 
 fn draw_porters(world: &mut World, camera: Camera) {
-    let mut query = world.query::<(&Position, &Porter, &Cargo, &AssignedJob)>();
-    for (position, porter, cargo, job) in query.iter(world) {
-        if !camera.contains(*position) {
+    let mut query = world.query::<(Entity, &Position, &Porter, &AssignedJob)>();
+    let porters = query
+        .iter(world)
+        .map(|(entity, position, porter, job)| (entity, *position, porter.id, job.phase))
+        .collect::<Vec<_>>();
+    for (entity, position, porter_id, phase) in porters {
+        if !camera.contains(position) {
             continue;
         }
-        let (px, py) = tile_to_screen(camera, (*position).into());
-        let color = if cargo.current_weight > 0.0 {
+        let (px, py) = tile_to_screen(camera, position.into());
+        let color = if derived_load(world, entity) > 0.0 {
             Color::from_rgba(238, 196, 99, 255)
         } else {
             Color::from_rgba(80, 210, 170, 255)
@@ -194,9 +198,9 @@ fn draw_porters(world: &mut World, camera: Camera) {
         draw_circle(cx, cy, 8.0, Color::from_rgba(12, 14, 16, 230));
         draw_circle(cx, cy, 6.0, color);
         draw_circle_lines(cx, cy, 9.5, 2.0, WHITE);
-        draw_text(&format!("P{}", porter.id), px + 1.0, py + 13.0, 12.0, BLACK);
+        draw_text(&format!("P{}", porter_id), px + 1.0, py + 13.0, 12.0, BLACK);
 
-        let label = match job.phase {
+        let label = match phase {
             JobPhase::FindParcel => "?",
             JobPhase::GoToParcel => "P",
             JobPhase::GoToDepot => "D",
@@ -208,16 +212,19 @@ fn draw_porters(world: &mut World, camera: Camera) {
 
 fn draw_player(world: &mut World, camera: Camera) {
     let mut query = world
-        .query_filtered::<(&Position, &Stamina, &Cargo, &MovementState, &Momentum), With<Player>>();
-    let Some((position, stamina, cargo, movement_state, _momentum)) = query.iter(world).next()
+        .query_filtered::<(Entity, &Position, &Stamina, &MovementState, &Momentum), With<Player>>();
+    let Some((entity, position, stamina, movement_state, _momentum)) = query.iter(world).next()
     else {
         return;
     };
-    if !camera.contains(*position) {
+    let position = *position;
+    let stamina = *stamina;
+    let movement_state = *movement_state;
+    if !camera.contains(position) {
         return;
     }
 
-    let (px, py) = tile_to_screen(camera, (*position).into());
+    let (px, py) = tile_to_screen(camera, position.into());
     let player_color = match movement_state.mode {
         crate::movement::MovementMode::Walking => Color::from_rgba(235, 235, 246, 255),
         crate::movement::MovementMode::Sprinting => Color::from_rgba(250, 218, 108, 255),
@@ -254,7 +261,7 @@ fn draw_player(world: &mut World, camera: Camera) {
         Color::from_rgba(90, 220, 130, 255),
     );
 
-    if cargo.current_weight > 0.0 {
+    if derived_load(world, entity) > 0.0 {
         draw_circle(
             px + 13.0,
             py + 4.0,

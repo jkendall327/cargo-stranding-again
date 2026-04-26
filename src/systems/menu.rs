@@ -61,8 +61,7 @@ pub fn menu_navigation(world: &mut World) {
 mod tests {
     use super::*;
     use crate::cargo::{
-        refresh_cargo_cache, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item,
-        ParcelState,
+        derived_load, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item, ParcelState,
     };
     use crate::components::{ActionEnergy, Player, Position};
     use crate::resources::{EnergyTimeline, InventoryIntent, PlayerIntent, SimulationClock};
@@ -70,10 +69,10 @@ mod tests {
     use crate::systems::inventory::inventory_actions;
     use crate::systems::{
         clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs, log_failed_cargo_actions,
-        maintain_cargo_messages, refresh_changed_cargo_caches, resolve_delivery_requests,
-        resolve_drop_requests, resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
-        update_porter_jobs_from_cargo_results, CargoActionResult, CargoChanged, DeliverRequest,
-        DropRequest, PickUpRequest,
+        maintain_cargo_messages, resolve_delivery_requests, resolve_drop_requests,
+        resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
+        update_porter_jobs_from_cargo_results, CargoActionResult, DeliverRequest, DropRequest,
+        PickUpRequest,
     };
     use bevy_ecs::schedule::ApplyDeferred;
 
@@ -82,17 +81,14 @@ mod tests {
             .spawn((
                 Player,
                 position,
-                Cargo {
-                    current_weight: 0.0,
-                    max_weight: 40.0,
-                },
+                Cargo { max_weight: 40.0 },
                 ActionEnergy::default(),
             ))
             .id()
     }
 
     fn spawn_carried_parcel(world: &mut World, holder: Entity, position: Position) -> Entity {
-        let parcel = world
+        world
             .spawn((
                 position,
                 Item,
@@ -107,9 +103,7 @@ mod tests {
                 CargoParcel { weight: 5.0 },
                 ParcelState::CarriedBy(holder),
             ))
-            .id();
-        refresh_cargo_cache(world, holder);
-        parcel
+            .id()
     }
 
     fn setup_menu_world(world: &mut World, screen: GameScreen, action: MenuAction) {
@@ -122,7 +116,6 @@ mod tests {
         world.init_resource::<Messages<PickUpRequest>>();
         world.init_resource::<Messages<DropRequest>>();
         world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoChanged>>();
         world.init_resource::<Messages<CargoActionResult>>();
         world.insert_resource(MenuInputState {
             action: Some(action),
@@ -139,7 +132,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -281,14 +273,17 @@ mod tests {
             Position { x: 2, y: 2 }
         );
 
-        let mut player_query = world.query_filtered::<(&Cargo, &ActionEnergy), With<Player>>();
-        let (cargo, energy) = player_query
-            .iter(&world)
-            .next()
-            .expect("test player should exist");
-        assert_eq!(cargo.current_weight, 0.0);
-        assert!(energy.ready_at > 0);
+        let (player, ready_at) = {
+            let mut player_query = world.query_filtered::<(Entity, &ActionEnergy), With<Player>>();
+            let (player, energy) = player_query
+                .iter(&world)
+                .next()
+                .expect("test player should exist");
+            (player, energy.ready_at)
+        };
+        assert_eq!(derived_load(&mut world, player), 0.0);
+        assert!(ready_at > 0);
         assert_eq!(world.resource::<SimulationClock>().turn, 1);
-        assert_eq!(world.resource::<EnergyTimeline>().now, energy.ready_at);
+        assert_eq!(world.resource::<EnergyTimeline>().now, ready_at);
     }
 }

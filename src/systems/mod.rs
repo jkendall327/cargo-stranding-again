@@ -10,10 +10,10 @@ pub mod wait;
 pub use agents::{assign_porter_jobs, porter_jobs, update_porter_action_interest};
 pub use cargo::{
     clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs, log_failed_cargo_actions,
-    maintain_cargo_messages, refresh_changed_cargo_caches, resolve_delivery_requests,
-    resolve_drop_requests, resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
-    update_porter_jobs_from_cargo_results, CargoAction, CargoActionResult, CargoChanged,
-    DeliverRequest, DropRequest, PickUpRequest,
+    maintain_cargo_messages, resolve_delivery_requests, resolve_drop_requests,
+    resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
+    update_porter_jobs_from_cargo_results, CargoAction, CargoActionResult, DeliverRequest,
+    DropRequest, PickUpRequest,
 };
 pub use inventory::inventory_actions;
 pub use menu::menu_navigation;

@@ -4,8 +4,9 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use crate::cargo::{
-    Cargo, CargoError, CargoParcel, CargoStats, CargoTarget, CarriedBy, CarrySlot, ContainedIn,
-    Container, Item, ParcelState,
+    actor_loads_from_relationships, container_loads_from_relationships, Cargo, CargoError,
+    CargoParcel, CargoStats, CargoTarget, CarriedBy, CarrySlot, ContainedIn, ContainedLoad,
+    Container, ContainerLoad, DirectCarryLoad, Item, ParcelState,
 };
 use crate::components::{ActionEnergy, AssignedJob, JobPhase, Player, Porter, Position};
 use crate::energy::ITEM_ACTION_ENERGY_COST;
@@ -32,12 +33,6 @@ pub struct DropRequest {
 pub struct DeliverRequest {
     pub actor: Entity,
     pub item: Entity,
-}
-
-#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
-/// Marks an actor whose cached cargo load should be derived again.
-pub struct CargoChanged {
-    pub actor: Entity,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,7 +82,6 @@ struct PickupScratch {
 pub fn resolve_pickup_requests(
     mut commands: Commands,
     mut pickup_requests: MessageReader<PickUpRequest>,
-    mut changed: MessageWriter<CargoChanged>,
     mut results: MessageWriter<CargoActionResult>,
     queries: PickupCargoQueries,
 ) {
@@ -129,9 +123,6 @@ pub fn resolve_pickup_requests(
                     .entity(request.item)
                     .insert(ParcelState::CarriedBy(request.actor));
             }
-            changed.write(CargoChanged {
-                actor: request.actor,
-            });
         }
         results.write(CargoActionResult {
             actor: request.actor,
@@ -146,7 +137,6 @@ pub fn resolve_pickup_requests(
 pub fn resolve_drop_requests(
     mut commands: Commands,
     mut drop_requests: MessageReader<DropRequest>,
-    mut changed: MessageWriter<CargoChanged>,
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
     items: Query<ItemState>,
@@ -163,9 +153,6 @@ pub fn resolve_drop_requests(
             if has_parcel_state(&items, request.item) {
                 commands.entity(request.item).insert(ParcelState::Loose);
             }
-            changed.write(CargoChanged {
-                actor: request.actor,
-            });
         }
         results.write(CargoActionResult {
             actor: request.actor,
@@ -180,7 +167,6 @@ pub fn resolve_drop_requests(
 pub fn resolve_delivery_requests(
     mut commands: Commands,
     mut deliver_requests: MessageReader<DeliverRequest>,
-    mut changed: MessageWriter<CargoChanged>,
     mut results: MessageWriter<CargoActionResult>,
     cargo: Query<&Cargo>,
     items: Query<ItemState>,
@@ -194,9 +180,6 @@ pub fn resolve_delivery_requests(
                 .remove::<CarriedBy>()
                 .remove::<ContainedIn>()
                 .insert(ParcelState::Delivered);
-            changed.write(CargoChanged {
-                actor: request.actor,
-            });
         }
         results.write(CargoActionResult {
             actor: request.actor,
@@ -204,20 +187,6 @@ pub fn resolve_delivery_requests(
             action: CargoAction::Deliver,
             result,
         });
-    }
-}
-
-pub fn refresh_changed_cargo_caches(
-    mut changed: MessageReader<CargoChanged>,
-    direct_carries: Query<(Entity, &CargoStats, &CarriedBy)>,
-    contained_items: Query<(&CargoStats, &ContainedIn)>,
-    mut cargo: Query<&mut Cargo>,
-) {
-    for event in changed.read() {
-        let load = derived_load_from_query(&direct_carries, &contained_items, event.actor);
-        if let Ok(mut cargo) = cargo.get_mut(event.actor) {
-            cargo.current_weight = load;
-        }
     }
 }
 
@@ -296,13 +265,11 @@ pub fn maintain_cargo_messages(
     mut pickup_requests: ResMut<Messages<PickUpRequest>>,
     mut drop_requests: ResMut<Messages<DropRequest>>,
     mut deliver_requests: ResMut<Messages<DeliverRequest>>,
-    mut changed: ResMut<Messages<CargoChanged>>,
     mut results: ResMut<Messages<CargoActionResult>>,
 ) {
     pickup_requests.update();
     drop_requests.update();
     deliver_requests.update();
-    changed.update();
     results.update();
 }
 
@@ -437,26 +404,6 @@ fn has_parcel_state(items: &Query<ItemState>, item: Entity) -> bool {
         .is_ok_and(|(_, _, _, _, parcel_state)| parcel_state.is_some())
 }
 
-fn derived_load_from_query(
-    direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
-    contained_items: &Query<(&CargoStats, &ContainedIn)>,
-    actor: Entity,
-) -> f32 {
-    let container_loads = container_loads_from_query(contained_items);
-    direct_carries
-        .iter()
-        .filter_map(|(entity, stats, carried_by)| {
-            (carried_by.holder == actor).then_some(
-                stats.weight
-                    + container_loads
-                        .get(&entity)
-                        .map(|load| load.weight)
-                        .unwrap_or_default(),
-            )
-        })
-        .sum()
-}
-
 fn occupied_slots_from_query(
     direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
 ) -> HashSet<(Entity, CarrySlot)> {
@@ -466,39 +413,45 @@ fn occupied_slots_from_query(
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct ContainerLoad {
-    weight: f32,
-    volume: f32,
-}
-
 fn actor_loads_from_query(
     direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
     contained_items: &Query<(&CargoStats, &ContainedIn)>,
 ) -> HashMap<Entity, f32> {
-    let container_loads = container_loads_from_query(contained_items);
-    let mut actor_loads = HashMap::<Entity, f32>::new();
-    for (entity, stats, carried_by) in direct_carries.iter() {
-        let load = stats.weight
-            + container_loads
-                .get(&entity)
-                .map(|load| load.weight)
-                .unwrap_or_default();
-        *actor_loads.entry(carried_by.holder).or_default() += load;
-    }
-    actor_loads
+    actor_loads_from_relationships(
+        direct_loads_from_query(direct_carries),
+        contained_loads_from_query(contained_items),
+    )
 }
 
 fn container_loads_from_query(
     contained_items: &Query<(&CargoStats, &ContainedIn)>,
 ) -> HashMap<Entity, ContainerLoad> {
-    let mut loads = HashMap::<Entity, ContainerLoad>::new();
-    for (stats, contained_in) in contained_items.iter() {
-        let load = loads.entry(contained_in.container).or_default();
-        load.weight += stats.weight;
-        load.volume += stats.volume;
-    }
-    loads
+    container_loads_from_relationships(contained_loads_from_query(contained_items))
+}
+
+fn direct_loads_from_query(
+    direct_carries: &Query<(Entity, &CargoStats, &CarriedBy)>,
+) -> Vec<DirectCarryLoad> {
+    direct_carries
+        .iter()
+        .map(|(item, stats, carried_by)| DirectCarryLoad {
+            item,
+            stats: *stats,
+            carried_by: *carried_by,
+        })
+        .collect()
+}
+
+fn contained_loads_from_query(
+    contained_items: &Query<(&CargoStats, &ContainedIn)>,
+) -> Vec<ContainedLoad> {
+    contained_items
+        .iter()
+        .map(|(stats, contained_in)| ContainedLoad {
+            stats: *stats,
+            contained_in: *contained_in,
+        })
+        .collect()
 }
 
 fn handle_successful_job_result(
@@ -578,6 +531,7 @@ fn parcel_carried_by_actor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cargo::derived_load;
     use bevy_ecs::schedule::ApplyDeferred;
 
     fn init_cargo_resources(world: &mut World) {
@@ -587,7 +541,6 @@ mod tests {
         world.init_resource::<Messages<PickUpRequest>>();
         world.init_resource::<Messages<DropRequest>>();
         world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoChanged>>();
         world.init_resource::<Messages<CargoActionResult>>();
     }
 
@@ -599,7 +552,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -614,13 +566,7 @@ mod tests {
 
     fn spawn_actor(world: &mut World, max_weight: f32) -> Entity {
         world
-            .spawn((
-                Cargo {
-                    current_weight: 0.0,
-                    max_weight,
-                },
-                ActionEnergy::default(),
-            ))
+            .spawn((Cargo { max_weight }, ActionEnergy::default()))
             .id()
     }
 
@@ -665,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn pickup_succeeds_and_spends_energy_after_cache_refresh() {
+    fn pickup_succeeds_and_spends_energy_with_derived_load() {
         let mut world = World::new();
         init_cargo_resources(&mut world);
         let actor = spawn_actor(&mut world, 40.0);
@@ -688,13 +634,7 @@ mod tests {
             world.get::<ParcelState>(parcel).copied(),
             Some(ParcelState::CarriedBy(actor))
         );
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            5.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 5.0);
         assert_eq!(
             world
                 .get::<ActionEnergy>(actor)
@@ -725,13 +665,7 @@ mod tests {
             world.get::<ParcelState>(parcel).copied(),
             Some(ParcelState::Loose)
         );
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            0.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 0.0);
         assert_eq!(
             world
                 .get::<ActionEnergy>(actor)
@@ -754,10 +688,6 @@ mod tests {
             },
             ParcelState::CarriedBy(actor),
         ));
-        world
-            .get_mut::<Cargo>(actor)
-            .expect("actor should keep cargo")
-            .current_weight = 5.0;
         let waiting = spawn_loose_parcel(&mut world, Position { x: 2, y: 1 }, 5.0);
         world
             .resource_mut::<Messages<PickUpRequest>>()
@@ -774,13 +704,7 @@ mod tests {
             world.get::<ParcelState>(waiting).copied(),
             Some(ParcelState::Loose)
         );
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            5.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 5.0);
         assert_eq!(
             world
                 .get::<ActionEnergy>(actor)
@@ -818,13 +742,7 @@ mod tests {
             .filter(|item| world.get::<CarriedBy>(*item).is_some())
             .count();
         assert_eq!(carried_count, 1);
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            5.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 5.0);
         assert_eq!(
             world
                 .get::<ActionEnergy>(actor)
@@ -858,13 +776,7 @@ mod tests {
                 .map(|contained_in| contained_in.container),
             Some(container)
         );
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            7.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 7.0);
     }
 
     #[test]
@@ -899,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn drop_succeeds_and_refreshes_cache() {
+    fn drop_succeeds_and_updates_relationship_load() {
         let mut world = World::new();
         init_cargo_resources(&mut world);
         let actor = spawn_actor(&mut world, 40.0);
@@ -911,10 +823,6 @@ mod tests {
             },
             ParcelState::CarriedBy(actor),
         ));
-        world
-            .get_mut::<Cargo>(actor)
-            .expect("actor should keep cargo")
-            .current_weight = 5.0;
         world
             .resource_mut::<Messages<DropRequest>>()
             .write(DropRequest {
@@ -934,13 +842,7 @@ mod tests {
             world.get::<ParcelState>(parcel).copied(),
             Some(ParcelState::Loose)
         );
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            0.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 0.0);
         assert_eq!(
             world
                 .get::<ActionEnergy>(actor)
@@ -957,10 +859,7 @@ mod tests {
         let actor = world
             .spawn((
                 Porter { id: 0 },
-                Cargo {
-                    current_weight: 5.0,
-                    max_weight: 40.0,
-                },
+                Cargo { max_weight: 40.0 },
                 AssignedJob {
                     phase: JobPhase::GoToDepot,
                     parcel: None,
@@ -994,13 +893,7 @@ mod tests {
             world.get::<ParcelState>(parcel).copied(),
             Some(ParcelState::Delivered)
         );
-        assert_eq!(
-            world
-                .get::<Cargo>(actor)
-                .expect("actor should keep cargo")
-                .current_weight,
-            0.0
-        );
+        assert_eq!(derived_load(&mut world, actor), 0.0);
         assert_eq!(
             world
                 .get::<ActionEnergy>(actor)

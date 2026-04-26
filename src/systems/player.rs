@@ -4,7 +4,8 @@ mod cargo;
 mod movement;
 
 use crate::cargo::{
-    Cargo, CargoParcel, CargoTarget, CarriedBy, ContainedIn, Container, Item, ParcelState,
+    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, ContainedIn, Container, Item,
+    ParcelState,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -152,6 +153,13 @@ pub fn player_actions(world: &mut World) {
     let map = world.resource::<Map>().clone();
     let timeline = *world.resource::<EnergyTimeline>();
     let mut cargo_loss_risk = *world.resource::<CargoLossRisk>();
+    let Some(player_entity) = ({
+        let mut query = world.query_filtered::<Entity, With<Player>>();
+        query.iter(world).next()
+    }) else {
+        return;
+    };
+    let current_load = derived_load(world, player_entity);
 
     let mut player_query = world.query_filtered::<PlayerActionItem, With<Player>>();
     let Ok((
@@ -185,7 +193,8 @@ pub fn player_actions(world: &mut World) {
                     position: &mut position,
                     velocity: &mut velocity,
                     stamina: &mut stamina,
-                    cargo: &cargo,
+                    current_load,
+                    max_load: cargo.max_weight,
                     movement_state: &movement_state,
                     momentum: &mut momentum,
                     energy: &mut energy,
@@ -207,19 +216,17 @@ pub fn player_actions(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cargo as cargo_model;
-    use crate::cargo::{CargoParcel, CargoStats, CarriedBy, CarrySlot, Item};
+    use crate::cargo::{derived_load, CargoParcel, CargoStats, CarriedBy, CarrySlot, Item};
     use crate::map::{Terrain, TileCoord};
     use crate::resources::Direction;
     use crate::systems::{
         clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs,
         emit_player_cycle_movement_request, emit_player_wait_request, log_failed_cargo_actions,
         maintain_cargo_messages, maintain_cycle_movement_requests, maintain_wait_requests,
-        refresh_changed_cargo_caches, resolve_cycle_movement_requests, resolve_delivery_requests,
-        resolve_drop_requests, resolve_pickup_requests, resolve_wait_requests,
-        spend_energy_for_successful_cargo_actions, update_porter_jobs_from_cargo_results,
-        CargoActionResult, CargoChanged, CycleMovementRequest, DeliverRequest, DropRequest,
-        PickUpRequest, WaitRequest,
+        resolve_cycle_movement_requests, resolve_delivery_requests, resolve_drop_requests,
+        resolve_pickup_requests, resolve_wait_requests, spend_energy_for_successful_cargo_actions,
+        update_porter_jobs_from_cargo_results, CargoActionResult, CycleMovementRequest,
+        DeliverRequest, DropRequest, PickUpRequest, WaitRequest,
     };
     use bevy_ecs::schedule::ApplyDeferred;
 
@@ -237,7 +244,6 @@ mod tests {
         world.init_resource::<Messages<PickUpRequest>>();
         world.init_resource::<Messages<DropRequest>>();
         world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoChanged>>();
         world.init_resource::<Messages<CargoActionResult>>();
     }
 
@@ -273,7 +279,6 @@ mod tests {
             CargoParcel { weight: 5.0 },
             ParcelState::CarriedBy(holder),
         ));
-        cargo_model::refresh_cargo_cache(world, holder);
     }
 
     fn spawn_test_player(world: &mut World, position: Position, stamina: f32) -> Entity {
@@ -282,10 +287,7 @@ mod tests {
                 Player,
                 position,
                 Velocity::default(),
-                Cargo {
-                    current_weight: 0.0,
-                    max_weight: 40.0,
-                },
+                Cargo { max_weight: 40.0 },
                 Stamina {
                     current: stamina,
                     max: 35.0,
@@ -528,7 +530,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -540,14 +541,16 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        let mut player_query = world.query_filtered::<(&Position, &Cargo), With<Player>>();
-        let (player_position, cargo) = player_query
-            .iter(&world)
-            .next()
-            .expect("test player should exist");
-        assert_eq!(*player_position, Position { x: 6, y: 7 });
-        assert_eq!(cargo.current_weight, 0.0);
-        let player_position = *player_position;
+        let (player_entity, player_position) = {
+            let mut player_query = world.query_filtered::<(Entity, &Position), With<Player>>();
+            let (player_entity, player_position) = player_query
+                .iter(&world)
+                .next()
+                .expect("test player should exist");
+            (player_entity, *player_position)
+        };
+        assert_eq!(player_position, Position { x: 6, y: 7 });
+        assert_eq!(derived_load(&mut world, player_entity), 0.0);
 
         let mut parcel_query = world.query::<(&Position, &ParcelState)>();
         let (parcel_position, parcel_state) = parcel_query
@@ -568,7 +571,6 @@ mod tests {
         world.init_resource::<Messages<PickUpRequest>>();
         world.init_resource::<Messages<DropRequest>>();
         world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoChanged>>();
         world.init_resource::<Messages<CargoActionResult>>();
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 }, 35.0);
         spawn_carried_test_parcel(&mut world, player, Position { x: 0, y: 0 });
@@ -581,7 +583,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -593,10 +594,7 @@ mod tests {
         );
         schedule.run(&mut world);
 
-        let cargo = world
-            .get::<Cargo>(player)
-            .expect("test player should have cargo");
-        assert_eq!(cargo.current_weight, 0.0);
+        assert_eq!(derived_load(&mut world, player), 0.0);
 
         let mut parcel_query = world.query::<&ParcelState>();
         assert_eq!(
@@ -708,7 +706,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -727,12 +724,12 @@ mod tests {
             .expect("test player should exist");
         assert!(energy.ready_at > 0);
 
-        let mut cargo_query = world.query_filtered::<&Cargo, With<Player>>();
-        let cargo = cargo_query
+        let mut cargo_query = world.query_filtered::<Entity, With<Player>>();
+        let player = cargo_query
             .iter(&world)
             .next()
             .expect("test player should exist");
-        assert_eq!(cargo.current_weight, 5.0);
+        assert_eq!(derived_load(&mut world, player), 5.0);
 
         let mut parcel_query = world.query::<&ParcelState>();
         let carried_parcels = parcel_query
@@ -757,7 +754,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -793,7 +789,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -809,10 +804,7 @@ mod tests {
             .get::<ActionEnergy>(player)
             .expect("test player should have energy");
         assert_eq!(energy.ready_at, 0);
-        let cargo = world
-            .get::<Cargo>(player)
-            .expect("test player should have cargo");
-        assert_eq!(cargo.current_weight, 0.0);
+        assert_eq!(derived_load(&mut world, player), 0.0);
 
         let mut parcel_query = world.query::<&ParcelState>();
         assert!(parcel_query

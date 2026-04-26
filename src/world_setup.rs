@@ -1,8 +1,7 @@
 use bevy_ecs::prelude::*;
 
 use crate::cargo::{
-    refresh_cargo_cache, Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Container, Item,
-    ParcelState,
+    Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Container, Item, ParcelState,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -13,8 +12,8 @@ use crate::resources::{
     InventoryMenuState, MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
 };
 use crate::systems::{
-    CargoActionResult, CargoChanged, CycleMovementRequest, DeliverRequest, DropRequest,
-    PickUpRequest, WaitRequest,
+    CargoActionResult, CycleMovementRequest, DeliverRequest, DropRequest, PickUpRequest,
+    WaitRequest,
 };
 
 pub fn init_world(world: &mut World) {
@@ -39,7 +38,6 @@ pub fn init_world(world: &mut World) {
     world.init_resource::<Messages<PickUpRequest>>();
     world.init_resource::<Messages<DropRequest>>();
     world.init_resource::<Messages<DeliverRequest>>();
-    world.init_resource::<Messages<CargoChanged>>();
     world.init_resource::<Messages<CargoActionResult>>();
 
     let player_entity = world
@@ -48,10 +46,7 @@ pub fn init_world(world: &mut World) {
             Player,
             Position { x: 6, y: 6 },
             Velocity::default(),
-            Cargo {
-                current_weight: 0.0,
-                max_weight: 40.0,
-            },
+            Cargo { max_weight: 40.0 },
             Stamina {
                 current: 35.0,
                 max: 35.0,
@@ -88,8 +83,6 @@ pub fn init_world(world: &mut World) {
             slot: CarrySlot::Back,
         },
     ));
-    refresh_cargo_cache(world, player_entity);
-
     for (id, (x, y)) in [(0, (41, 30)), (1, (52, 26))] {
         let porter_entity = world
             .spawn((
@@ -99,10 +92,7 @@ pub fn init_world(world: &mut World) {
                 Porter { id },
                 Position { x, y },
                 Velocity::default(),
-                Cargo {
-                    current_weight: 0.0,
-                    max_weight: 35.0,
-                },
+                Cargo { max_weight: 35.0 },
                 AssignedJob {
                     phase: JobPhase::FindParcel,
                     parcel: None,
@@ -125,7 +115,6 @@ pub fn init_world(world: &mut World) {
                 slot: CarrySlot::Back,
             },
         ));
-        refresh_cargo_cache(world, porter_entity);
     }
 
     for (x, y, weight) in [

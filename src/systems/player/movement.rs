@@ -1,6 +1,5 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::Cargo;
 use crate::components::{Momentum, MovementState, Position, Stamina, Velocity};
 use crate::energy::ActionEnergy;
 use crate::map::Map;
@@ -15,7 +14,8 @@ pub(super) struct PlayerMovement<'a> {
     pub position: &'a mut Position,
     pub velocity: &'a mut Velocity,
     pub stamina: &'a mut Stamina,
-    pub cargo: &'a Cargo,
+    pub current_load: f32,
+    pub max_load: f32,
     pub movement_state: &'a MovementState,
     pub momentum: &'a mut Momentum,
     pub energy: &'a mut ActionEnergy,
@@ -35,8 +35,8 @@ pub(super) fn try_move_player(
         max: actor.stamina.max,
     });
     request.cargo = CargoLoad {
-        current_weight: actor.cargo.current_weight,
-        max_weight: actor.cargo.max_weight,
+        current_weight: actor.current_load,
+        max_weight: actor.max_load,
     };
 
     let outcome = resolve_movement(map, request);

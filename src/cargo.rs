@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use bevy_ecs::prelude::*;
 
 use crate::components::Player;
@@ -5,7 +7,7 @@ use crate::components::Player;
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Item;
 
-#[derive(Component, Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct CargoStats {
     pub weight: f32,
     pub volume: f32,
@@ -52,7 +54,7 @@ pub struct ContainerContents(Vec<Entity>);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Cargo {
-    pub current_weight: f32,
+    /// Maximum derived carried weight this actor can support.
     pub max_weight: f32,
 }
 
@@ -99,6 +101,25 @@ pub enum CargoError {
     SlotOccupied,
     CapacityExceeded,
     ContainerCapacityExceeded,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ContainerLoad {
+    pub weight: f32,
+    pub volume: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DirectCarryLoad {
+    pub item: Entity,
+    pub stats: CargoStats,
+    pub carried_by: CarriedBy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContainedLoad {
+    pub stats: CargoStats,
+    pub contained_in: ContainedIn,
 }
 
 /// Lists parcel cargo currently carried by a holder, independent of slot.
@@ -183,19 +204,88 @@ pub fn carried_items(world: &mut World, holder: Entity) -> Vec<CarriedItemEntry>
 }
 
 pub fn derived_load(world: &mut World, holder: Entity) -> f32 {
-    carried_items(world, holder)
+    let mut direct_query = world.query::<(Entity, &CargoStats, &CarriedBy)>();
+    let direct_carries = direct_query
+        .iter(world)
+        .map(|(item, stats, carried_by)| DirectCarryLoad {
+            item,
+            stats: *stats,
+            carried_by: *carried_by,
+        })
+        .collect::<Vec<_>>();
+    let mut contained_query = world.query::<(&CargoStats, &ContainedIn)>();
+    let contained_items = contained_query
+        .iter(world)
+        .map(|(stats, contained_in)| ContainedLoad {
+            stats: *stats,
+            contained_in: *contained_in,
+        })
+        .collect::<Vec<_>>();
+    derived_load_from_relationships(direct_carries, contained_items, holder)
+}
+
+/// Derives an actor's current load from carry/container relationships.
+///
+/// This is the canonical load calculation: direct carried items count their own
+/// weight plus any items contained inside them, while loose contained items only
+/// affect a holder when their container is carried by that holder.
+pub fn derived_load_from_relationships<D, C>(
+    direct_carries: D,
+    contained_items: C,
+    holder: Entity,
+) -> f32
+where
+    D: IntoIterator<Item = DirectCarryLoad>,
+    C: IntoIterator<Item = ContainedLoad>,
+{
+    let direct_carries = direct_carries.into_iter().collect::<Vec<_>>();
+    let container_loads = container_loads_from_relationships(contained_items);
+    direct_carries
         .iter()
-        .map(|item| item.weight)
+        .filter_map(|entry| {
+            (entry.carried_by.holder == holder).then_some(
+                entry.stats.weight
+                    + container_loads
+                        .get(&entry.item)
+                        .map(|load| load.weight)
+                        .unwrap_or_default(),
+            )
+        })
         .sum()
 }
 
-pub fn refresh_cargo_cache(world: &mut World, holder: Entity) -> bool {
-    let load = derived_load(world, holder);
-    let Some(mut cargo) = world.get_mut::<Cargo>(holder) else {
-        return false;
-    };
-    cargo.current_weight = load;
-    true
+pub fn actor_loads_from_relationships<D, C>(
+    direct_carries: D,
+    contained_items: C,
+) -> HashMap<Entity, f32>
+where
+    D: IntoIterator<Item = DirectCarryLoad>,
+    C: IntoIterator<Item = ContainedLoad>,
+{
+    let container_loads = container_loads_from_relationships(contained_items);
+    let mut actor_loads = HashMap::<Entity, f32>::new();
+    for entry in direct_carries {
+        let load = entry.stats.weight
+            + container_loads
+                .get(&entry.item)
+                .map(|load| load.weight)
+                .unwrap_or_default();
+        *actor_loads.entry(entry.carried_by.holder).or_default() += load;
+    }
+    actor_loads
+}
+
+pub fn container_loads_from_relationships<C>(contained_items: C) -> HashMap<Entity, ContainerLoad>
+where
+    C: IntoIterator<Item = ContainedLoad>,
+{
+    let mut loads = HashMap::<Entity, ContainerLoad>::new();
+    for entry in contained_items {
+        let load = loads.entry(entry.contained_in.container).or_default();
+        load.weight += entry.stats.weight;
+        load.volume += entry.stats.volume;
+    }
+    loads
 }
 
 fn player_entity(world: &mut World) -> Option<Entity> {
@@ -215,13 +305,8 @@ fn carried_containers(world: &mut World, holder: Entity) -> Vec<Entity> {
 mod tests {
     use super::*;
 
-    fn spawn_holder(world: &mut World, current_weight: f32, max_weight: f32) -> Entity {
-        world
-            .spawn((Cargo {
-                current_weight,
-                max_weight,
-            },))
-            .id()
+    fn spawn_holder(world: &mut World, max_weight: f32) -> Entity {
+        world.spawn((Cargo { max_weight },)).id()
     }
 
     fn spawn_loose_parcel(world: &mut World, weight: f32) -> Entity {
@@ -241,7 +326,7 @@ mod tests {
     #[test]
     fn derived_load_sums_carried_item_weights() {
         let mut world = World::new();
-        let holder = spawn_holder(&mut world, 0.0, 40.0);
+        let holder = spawn_holder(&mut world, 40.0);
         world.spawn((
             Item,
             CargoStats {
@@ -271,7 +356,7 @@ mod tests {
     #[test]
     fn derived_load_includes_items_inside_carried_containers() {
         let mut world = World::new();
-        let holder = spawn_holder(&mut world, 0.0, 40.0);
+        let holder = spawn_holder(&mut world, 40.0);
         let backpack = world
             .spawn((
                 Item,
@@ -308,9 +393,9 @@ mod tests {
     }
 
     #[test]
-    fn carried_parcels_lists_relationships_and_refreshes_cache() {
+    fn carried_parcels_lists_relationships() {
         let mut world = World::new();
-        let holder = spawn_holder(&mut world, 0.0, 40.0);
+        let holder = spawn_holder(&mut world, 40.0);
         let parcel = spawn_loose_parcel(&mut world, 5.0);
         world.entity_mut(parcel).insert((
             CarriedBy {
@@ -328,7 +413,6 @@ mod tests {
                 weight: 5.0
             }]
         );
-        assert!(refresh_cargo_cache(&mut world, holder));
         assert_eq!(
             world.get::<CarriedBy>(parcel).map(|carried| carried.holder),
             Some(holder)
@@ -339,32 +423,66 @@ mod tests {
                 .expect("picked-up parcel should keep a ParcelState"),
             ParcelState::CarriedBy(holder)
         );
+        assert_eq!(derived_load(&mut world, holder), 5.0);
+    }
+
+    #[test]
+    fn derived_load_from_relationships_is_pure_and_container_aware() {
+        let mut world = World::new();
+        let holder = spawn_holder(&mut world, 40.0);
+        let backpack = Entity::from_raw_u32(100).expect("test entity id should be valid");
+        let parcel = Entity::from_raw_u32(101).expect("test entity id should be valid");
+
+        let direct_carries = [
+            DirectCarryLoad {
+                item: backpack,
+                stats: CargoStats {
+                    weight: 2.0,
+                    volume: 3.0,
+                },
+                carried_by: CarriedBy {
+                    holder,
+                    slot: CarrySlot::Back,
+                },
+            },
+            DirectCarryLoad {
+                item: parcel,
+                stats: CargoStats {
+                    weight: 4.0,
+                    volume: 1.0,
+                },
+                carried_by: CarriedBy {
+                    holder,
+                    slot: CarrySlot::Chest,
+                },
+            },
+        ];
+        let contained_items = [ContainedLoad {
+            stats: CargoStats {
+                weight: 5.0,
+                volume: 1.0,
+            },
+            contained_in: ContainedIn {
+                container: backpack,
+            },
+        }];
+
         assert_eq!(
-            world
-                .get::<Cargo>(holder)
-                .expect("holder should keep a Cargo component")
-                .current_weight,
-            5.0
+            derived_load_from_relationships(direct_carries, contained_items, holder),
+            11.0
         );
     }
 
     #[test]
-    fn refresh_cache_replaces_stale_weight_with_derived_load() {
+    fn derived_load_ignores_stale_or_missing_capacity() {
         let mut world = World::new();
-        let holder = spawn_holder(&mut world, 99.0, 40.0);
+        let holder = spawn_holder(&mut world, 40.0);
         let parcel = spawn_loose_parcel(&mut world, 5.0);
         world.entity_mut(parcel).insert(CarriedBy {
             holder,
             slot: CarrySlot::Back,
         });
 
-        assert!(refresh_cargo_cache(&mut world, holder));
-        assert_eq!(
-            world
-                .get::<Cargo>(holder)
-                .expect("holder should keep a Cargo component")
-                .current_weight,
-            5.0
-        );
+        assert_eq!(derived_load(&mut world, holder), 5.0);
     }
 }

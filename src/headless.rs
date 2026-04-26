@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
-use crate::cargo::{Cargo, CargoParcel, CargoStats, Item, ParcelState};
+use crate::cargo::{derived_load, CargoParcel, CargoStats, Item, ParcelState};
 use crate::components::{
     AssignedJob, AutonomousActor, Momentum, MovementState, Player, Porter, Position, Stamina,
     WantsAction,
@@ -89,31 +89,32 @@ impl HeadlessSnapshot {
         let timeline = world.resource::<EnergyTimeline>().now;
 
         let (
+            player_entity,
             player_position,
             player_stamina,
             player_movement_mode,
             player_momentum_amount,
             player_momentum_direction,
-            player_cargo,
         ) = {
             let mut player_query = world.query_filtered::<(
+                Entity,
                 &Position,
                 &Stamina,
                 &MovementState,
                 &Momentum,
-                &Cargo,
             ), With<Player>>();
-            let (position, stamina, movement_state, momentum, cargo) =
+            let (entity, position, stamina, movement_state, momentum) =
                 player_query.iter(world).next()?;
             (
+                entity,
                 *position,
                 stamina.current,
                 movement_state.mode,
                 momentum.amount,
                 momentum.direction,
-                cargo.current_weight,
             )
         };
+        let player_cargo = derived_load(world, player_entity);
         let (player_elevation, player_water_depth) = {
             let map = world.resource::<Map>();
             let player_coord = TileCoord::from(player_position);

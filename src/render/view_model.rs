@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::player_carried_parcels;
 use crate::cargo::Cargo;
+use crate::cargo::{derived_load, player_carried_parcels};
 use crate::components::{
     AssignedJob, JobPhase, Momentum, MovementState, Player, Porter, Position, Stamina,
 };
@@ -37,17 +37,18 @@ impl PlayerHudSnapshot {
         let timeline = *world.resource::<EnergyTimeline>();
 
         let (
+            player_entity,
             position,
             stamina_current,
             stamina_max,
             movement_mode,
             momentum_amount,
             momentum_direction,
-            cargo_current,
             cargo_max,
             energy,
         ) = {
             let mut player_query = world.query_filtered::<(
+                Entity,
                 &Position,
                 &Stamina,
                 &Cargo,
@@ -55,20 +56,21 @@ impl PlayerHudSnapshot {
                 &Momentum,
                 &ActionEnergy,
             ), With<Player>>();
-            let (position, stamina, cargo, movement_state, momentum, energy) =
+            let (entity, position, stamina, cargo, movement_state, momentum, energy) =
                 player_query.iter(world).next()?;
             (
+                entity,
                 *position,
                 stamina.current,
                 stamina.max,
                 movement_state.mode,
                 momentum.amount,
                 momentum.direction,
-                cargo.current_weight,
                 cargo.max_weight,
                 *energy,
             )
         };
+        let cargo_current = derived_load(world, player_entity);
 
         let (elevation, water_depth) = {
             let map = world.resource::<Map>();
@@ -129,15 +131,21 @@ impl InventoryEntry {
 impl PorterDebugRow {
     pub fn all_from_world(world: &mut World) -> Vec<Self> {
         let timeline = world.resource::<EnergyTimeline>().now;
-        let mut query = world.query::<(&Position, &Porter, &Cargo, &AssignedJob, &ActionEnergy)>();
-        let mut rows = query
+        let mut query = world.query::<(Entity, &Position, &Porter, &AssignedJob, &ActionEnergy)>();
+        let snapshots = query
             .iter(world)
-            .map(|(position, porter, cargo, job, energy)| Self {
-                id: porter.id,
-                position: *position,
-                phase_label: phase_label(job.phase),
-                load: cargo.current_weight,
-                ready_label: ready_label(*energy, timeline),
+            .map(|(entity, position, porter, job, energy)| {
+                (entity, *position, porter.id, job.phase, *energy)
+            })
+            .collect::<Vec<_>>();
+        let mut rows = snapshots
+            .into_iter()
+            .map(|(entity, position, id, phase, energy)| Self {
+                id,
+                position,
+                phase_label: phase_label(phase),
+                load: derived_load(world, entity),
+                ready_label: ready_label(energy, timeline),
             })
             .collect::<Vec<_>>();
         rows.sort_by_key(|row| row.id);

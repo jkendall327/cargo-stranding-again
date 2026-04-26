@@ -1,6 +1,8 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, Container, ParcelState};
+use crate::cargo::{
+    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, Container, ParcelState,
+};
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};
@@ -190,6 +192,7 @@ fn move_porter_toward(
     target: Position,
     now: u64,
 ) {
+    let current_load = derived_load(world, porter_entity);
     let mut query = world.query::<(&mut Position, &mut Velocity, &Cargo, &mut ActionEnergy)>();
     let Ok((mut position, mut velocity, cargo, mut energy)) = query.get_mut(world, porter_entity)
     else {
@@ -200,7 +203,7 @@ fn move_porter_toward(
         map,
         porter_entity,
         &mut position,
-        cargo.current_weight,
+        current_load,
         cargo.max_weight,
         target,
     ) {
@@ -271,10 +274,10 @@ mod tests {
     use crate::resources::DeliveryStats;
     use crate::systems::{
         clamp_inventory_after_cargo_drop, clear_failed_porter_cargo_jobs, log_failed_cargo_actions,
-        maintain_cargo_messages, refresh_changed_cargo_caches, resolve_delivery_requests,
-        resolve_drop_requests, resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
-        update_porter_jobs_from_cargo_results, CargoActionResult, CargoChanged, DeliverRequest,
-        DropRequest, PickUpRequest,
+        maintain_cargo_messages, resolve_delivery_requests, resolve_drop_requests,
+        resolve_pickup_requests, spend_energy_for_successful_cargo_actions,
+        update_porter_jobs_from_cargo_results, CargoActionResult, DeliverRequest, DropRequest,
+        PickUpRequest,
     };
     use bevy_ecs::schedule::ApplyDeferred;
 
@@ -283,7 +286,6 @@ mod tests {
         world.init_resource::<Messages<PickUpRequest>>();
         world.init_resource::<Messages<DropRequest>>();
         world.init_resource::<Messages<DeliverRequest>>();
-        world.init_resource::<Messages<CargoChanged>>();
         world.init_resource::<Messages<CargoActionResult>>();
     }
 
@@ -298,7 +300,6 @@ mod tests {
                 resolve_drop_requests,
                 resolve_delivery_requests,
                 ApplyDeferred,
-                refresh_changed_cargo_caches,
                 spend_energy_for_successful_cargo_actions,
                 update_porter_jobs_from_cargo_results,
                 clear_failed_porter_cargo_jobs,
@@ -320,10 +321,7 @@ mod tests {
                 Porter { id },
                 position,
                 Velocity::default(),
-                Cargo {
-                    current_weight: 0.0,
-                    max_weight: 35.0,
-                },
+                Cargo { max_weight: 35.0 },
                 AssignedJob {
                     phase: JobPhase::FindParcel,
                     parcel: None,
@@ -430,11 +428,11 @@ mod tests {
             .count();
         assert_eq!(delivered_parcels, 1);
 
-        let mut cargo_query = world.query_filtered::<&Cargo, With<Porter>>();
-        let cargo = cargo_query
+        let mut cargo_query = world.query_filtered::<Entity, With<Porter>>();
+        let porter = cargo_query
             .single(&world)
             .expect("test setup should leave exactly one porter");
-        assert_eq!(cargo.current_weight, 2.0);
+        assert_eq!(derived_load(&mut world, porter), 2.0);
     }
 
     #[test]
