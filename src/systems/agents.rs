@@ -1,5 +1,6 @@
 use bevy_ecs::prelude::*;
 
+use crate::ai::pathing::first_step_toward;
 use crate::cargo::{
     derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, ContainedIn, Container,
     ParcelDelivery,
@@ -8,7 +9,7 @@ use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
 use crate::map::{Map, TileCoord};
 use crate::movement::{resolve_movement, CargoLoad, MovementRequest};
-use crate::resources::{Direction, EnergyTimeline};
+use crate::resources::EnergyTimeline;
 use crate::systems::{DeliverRequest, PickUpRequest};
 
 type ParcelCarryState<'a> = (
@@ -226,70 +227,28 @@ fn move_porter_toward(
         return;
     };
 
-    if let Some(moved) = greedy_step(
-        map,
-        porter_entity,
-        &mut position,
-        current_load,
-        cargo.max_weight,
-        target,
-    ) {
+    let cargo_load = CargoLoad {
+        current_weight: current_load,
+        max_weight: cargo.max_weight,
+    };
+    let Some(direction) = first_step_toward(map, porter_entity, *position, target, cargo_load)
+    else {
+        energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
+        return;
+    };
+
+    let mut request = MovementRequest::walking(*position, direction);
+    request.entity = Some(porter_entity);
+    request.cargo = cargo_load;
+
+    if let Some(moved) = resolve_movement(map, request).moved() {
+        position.x = moved.target.x;
+        position.y = moved.target.y;
         velocity.dx = moved.actual_delta.0;
         velocity.dy = moved.actual_delta.1;
         energy.spend(now, moved.energy_cost);
     } else {
         energy.spend(now, DEFAULT_ACTION_ENERGY_COST);
-    }
-}
-
-fn greedy_step(
-    map: &Map,
-    entity: Entity,
-    position: &mut Position,
-    current_weight: f32,
-    max_weight: f32,
-    target: Position,
-) -> Option<crate::movement::MovementResult> {
-    let dx = (target.x - position.x).signum();
-    let dy = (target.y - position.y).signum();
-    let candidates = if (target.x - position.x).abs() >= (target.y - position.y).abs() {
-        [(dx, 0), (0, dy), (0, -dy), (-dx, 0)]
-    } else {
-        [(0, dy), (dx, 0), (-dx, 0), (0, -dy)]
-    };
-
-    for (step_x, step_y) in candidates {
-        if step_x == 0 && step_y == 0 {
-            continue;
-        }
-        let Some(direction) = direction_from_delta(step_x, step_y) else {
-            continue;
-        };
-        let mut request = MovementRequest::walking(*position, direction);
-        request.entity = Some(entity);
-        request.cargo = CargoLoad {
-            current_weight,
-            max_weight,
-        };
-
-        let outcome = resolve_movement(map, request);
-        if let Some(result) = outcome.moved() {
-            position.x = result.target.x;
-            position.y = result.target.y;
-            return Some(result);
-        }
-    }
-
-    None
-}
-
-fn direction_from_delta(dx: i32, dy: i32) -> Option<Direction> {
-    match (dx, dy) {
-        (-1, 0) => Some(Direction::West),
-        (1, 0) => Some(Direction::East),
-        (0, -1) => Some(Direction::North),
-        (0, 1) => Some(Direction::South),
-        _ => None,
     }
 }
 

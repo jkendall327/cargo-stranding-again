@@ -56,4 +56,4 @@ tracing output.
 - Timeline energy advances only when movement succeeds, pickup succeeds, or you wait. Failed movement and failed pickup do not spend energy.
 - Waiting recovers stamina directly.
 
-The prototype spawns loose cargo parcels, NPC porters, one depot, and simple delivery jobs. Porters greedily walk to parcels, pick them up, walk to the depot, and drop them off.
+The prototype spawns loose cargo parcels, NPC porters, one depot, and simple delivery jobs. Porters pathfind to parcels, pick them up, pathfind to the depot, and drop them off.

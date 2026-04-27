@@ -83,12 +83,12 @@ Goal: move from hardcoded porter delivery behavior toward simple goal-driven age
   - [ ] target entity
   - [ ] target tile
   - [ ] delivery depot / destination
-- [ ] Replace greedy movement with pathfinding.
+- [x] Replace greedy movement with pathfinding.
   - [x] Consider adding the `pathfinding` crate for BFS/A*/Dijkstra rather than hand-rolling graph search.
-  - [ ] Add a small `pathing` module that converts `Map` passability/costs into pathfinding successors.
-  - [ ] Start with BFS or A* on the current fixed map.
-  - [ ] Account for passability first.
-  - [ ] Later account for terrain movement cost, stamina, load, and danger.
+  - [x] Add a small `pathing` module that converts `Map` passability/costs into pathfinding successors.
+  - [x] Start with BFS or A* on the current fixed map.
+  - [x] Account for passability first.
+  - [ ] Later account for stamina budgets, actor-specific load constraints, and danger.
 - [ ] Allow agents to fail or abandon jobs.
   - [ ] Parcel no longer exists.
   - [ ] Parcel already carried by someone else.
@@ -104,7 +104,7 @@ Current code pointers:
 
 - `assign_porter_jobs` reserves loose parcels.
 - `porter_jobs` moves through `FindParcel`, `GoToParcel`, `GoToDepot`, `Done`.
-- `greedy_step` is deliberately simple and should be replaced before worldgen gets serious.
+- `ai::pathing` plans porter movement with A* using the shared movement resolver.
 
 ## 7. Simulationist Body, Balance, And Weather
 
