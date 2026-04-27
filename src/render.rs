@@ -16,11 +16,8 @@ pub fn window_conf() -> Conf {
         window_title: "Cargo Stranding Again".to_owned(),
         // The camera shows a configurable tile square while the debug panel
         // stays fixed to the right.
-        window_width: (layout::VIEWPORT_X * 2.0
-            + DEFAULT_CAMERA_TILE_SPAN as f32 * TILE_SIZE
-            + layout::UI_GAP
-            + 360.0) as i32,
-        window_height: 760,
+        window_width: layout::window_width_for_camera(DEFAULT_CAMERA_TILE_SPAN),
+        window_height: 1160,
         high_dpi: true,
         ..Default::default()
     }

@@ -10,17 +10,6 @@ The current codebase is a small but healthy Bevy ECS + Macroquad prototype. Keep
 - Normal terrain should stay in map/chunk arrays, not become ECS entities.
 - ECS entities are for things that behave: player, NPCs, cargo, containers, ropes, vehicles, fires, doors, buildables, etc.
 
-Dependency notes:
-
-- Keep dependencies small and purpose-driven.
-- [x] Add `tracing` / `tracing-subscriber` for basic structured logging.
-- [ ] Consider `pathfinding` when replacing NPC greedy stepping.
-  - Useful first targets: BFS for passability-only paths, then A* or Dijkstra once terrain cost matters.
-  - Keep it wrapped behind a small local pathing API so the rest of the sim does not care which algorithm crate is underneath.
-- [ ] Consider `rand` with a portable seeded RNG, or `rand_chacha`, once map/content generation needs seeds.
-  - Use deterministic seeds for generated maps, parcel placement, weather rolls, and test fixtures.
-  - Avoid thread-local randomness in simulation systems so headless runs stay reproducible.
-
 ## North Star Architecture
 
 Evolve the prototype around this pipeline:
@@ -46,33 +35,6 @@ Status: foundations done. Can add more actions like Interact, AdjustBalance etc.
 ## 3. Action Energy Timeline
 
 Goal: replace the current player-action heartbeat with a shared energy timeline so movement speed, terrain, stamina, cargo, combat, pickup/drop, and future debuffs all speak the same scheduling language.
-
-Design decisions:
-
-- One player input attempts one atomic action.
-  - `Move(North)` moves at most one tile.
-  - Sprinting should be visible through lower action delay / NPC timing, not by skipping multiple tiles in one input.
-- Use an energy timeline rather than "player action, then every NPC acts once."
-  - Actors act when they have enough energy for their next action.
-  - A priority queue or equivalent ready-time scheduler is the likely fit.
-- Sprinting lowers movement energy cost and increases stamina/stability cost.
-- Steady walking raises movement energy cost and reduces rough-terrain stamina cost.
-- Stamina can start as a hard gate for draining actions.
-  - Later, low stamina can become a risk/performance modifier without changing the scheduler architecture.
-- Non-movement actions should also cost energy.
-  - Simple defaults for now: movement, wait/rest, pickup/drop, interact, and future attacks all spend action energy.
-  - Exhaustion, bleeding, heavy load, weather, or injuries can become generalized energy/recovery modifiers.
-- Changing movement posture remains free for now.
-  - Bracing can later be a separate action that costs energy because it has immediate defensive value.
-- Keep physical momentum separate from scheduling energy.
-  - `Energy`: when/how often an actor can act.
-  - `Momentum`: body state and stability risk.
-  - `MovementState`: chosen posture/effort.
-- Food for thought later: if autonomous wildlife/NPC simulation becomes a larger
-  feature, consider whether the energy timeline should become more ECS-native
-  with first-class ready actor/timeline event phases. For now, keep player input
-  as the pacing boundary and use an explicit simulation runner for the custom
-  timeline orchestration.
 
 Status: done.
 
@@ -122,7 +84,7 @@ Goal: move from hardcoded porter delivery behavior toward simple goal-driven age
   - [ ] target tile
   - [ ] delivery depot / destination
 - [ ] Replace greedy movement with pathfinding.
-  - [ ] Consider adding the `pathfinding` crate for BFS/A*/Dijkstra rather than hand-rolling graph search.
+  - [x] Consider adding the `pathfinding` crate for BFS/A*/Dijkstra rather than hand-rolling graph search.
   - [ ] Add a small `pathing` module that converts `Map` passability/costs into pathfinding successors.
   - [ ] Start with BFS or A* on the current fixed map.
   - [ ] Account for passability first.
@@ -174,44 +136,7 @@ Implementation note:
 
 ## 8. Chunked Map And Procgen
 
-Goal: move from one fixed rectangle to deterministic, streamable world data.
-
-- [x] Introduce coordinate types.
-  - [x] `TileCoord`
-  - [x] `ChunkCoord`
-  - [x] Local tile coordinate inside chunk
-- [x] Introduce `Chunk`.
-  - [x] fixed width/height
-  - [x] terrain tile array
-  - [x] optional elevation/depth arrays later
-- [x] Introduce `WorldMap` or evolve `Map`.
-  - [x] active chunk storage
-  - [x] seed
-  - [x] chunk lookup by world tile coordinate
-- [x] Keep initial implementation compatible with the current generated map.
-  - [x] One chunk or a small fixed set of chunks is fine at first.
-- [x] Make procedural generation deterministic by seed and chunk coordinate.
-- [x] Add chunk load boundaries around the camera or player.
-  - Unloading is deliberately deferred while generated chunks stay in memory.
-- [x] Add persistence for visited/modified chunks.
-  - [x] Add explicit saved chunk/tile schema types.
-  - [x] Add runtime chunk <-> saved chunk round-trip tests.
-  - [x] Start with a simple save directory.
-  - [x] Persist loaded chunks as authoritative history.
-  - [ ] Later: persist only changed chunks if/when loaded chunk volume needs it.
-- [x] Update rendering to draw visible tiles across chunk boundaries.
-- [x] Update pathfinding/movement to query world coordinates, not fixed `0..width` / `0..height` assumptions.
-- [x] Add tests.
-  - [x] Same seed + chunk coordinate produces same terrain.
-  - [x] World coordinate lookup crosses chunk boundaries correctly.
-  - [x] Modified chunk state round-trips through save/load model.
-  - [x] Chunk state round-trips through filesystem save/load.
-
-Current code pointers:
-
-- `src/map.rs::Map` still exposes finite `width`/`height` bounds, but terrain storage is chunk-backed.
-- `src/resources.rs::Camera` clamps to map width/height.
-- Rendering iterates `Map::visible_tiles` and looks up chunk-backed tile data.
+Status: basically done. Only remaining task is 'persist only changed chunks if/when loaded chunk volume needs it'.
 
 ## 9. Verticality
 
@@ -278,6 +203,14 @@ Minor/future work:
 - [ ] Add save metadata for display names, timestamps, and build/debug labels.
 - [ ] Later: persist only changed chunks if loaded chunk volume needs it.
 - [ ] Later: support long-term world history with multiple characters per world.
+
+## 12. True Worldgen / Historygen
+
+Dwarf Fortress style simulation of a planet's history over N years.
+From geological change--the rise of mountains and the running of rivers--to the social.
+Kingdoms fall and counties merge. People murder and fall in love.
+
+Status: ideation.
 
 ## Useful Guardrails
 
