@@ -34,6 +34,7 @@ struct SaveMetadata {
 
 enum SaveKind {
     World,
+    Chunk,
     Character,
 }
 ```
@@ -320,12 +321,16 @@ to remain shaped like old save files forever.
 4. [x] Add loose cargo save/load round-trip tests.
 5. [x] Add player/character save structs.
 5a. [x] Add in-memory world save payload assembly for loaded chunks and loose cargo.
-6. [ ] Add world directory layout and single-world/single-character save commands.
+6. [x] Add world directory layout and single-world/single-character save commands.
    - [x] Add RON world manifest plus per-chunk filesystem round-trip.
    - [x] Add character file storage round-trip.
    - [x] Add single-world/single-character save commands.
-7. [ ] Add save eligibility helper.
+7. [x] Add save eligibility helper.
 8. [x] Add migration scaffolding before the second save version exists.
+   - [x] Bump current save files to v2.
+   - [x] Add an explicit v1 -> v2 no-op migration path.
+   - [x] Run migrations when reading world manifests, chunks, and characters.
+9. [ ] Add a debug save/load surface in the running app.
 
 The first useful test should prove that modified/generated chunk state
 round-trips exactly. The second should prove that loose cargo keeps identity,
@@ -343,6 +348,8 @@ Current status:
   cargo/container relationships through explicit save structs.
 - Save-slot persistence writes the world and character roots together and can
   reload a played headless state from disk.
+- New save files write schema version 2, and version 1 save envelopes migrate
+  to version 2 at the storage boundary without changing payload data.
 - Current porter NPC state, job phase, and parcel reservations persist as
   world-owned state.
 - Runtime `Chunk` exposes row-major tile snapshots and can be rebuilt from

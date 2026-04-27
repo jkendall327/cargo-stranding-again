@@ -5,6 +5,7 @@
 //! values before anything reaches this module.
 
 mod cargo;
+mod eligibility;
 mod envelope;
 mod ids;
 mod map;
@@ -19,6 +20,7 @@ pub use cargo::{
     SavedCargoItem, SavedCargoLocation, SavedCargoStats, SavedCarrySlot, SavedContainerState,
     SavedParcelState,
 };
+pub use eligibility::{player_can_save, SaveEligibility};
 pub use envelope::{Save, SaveKind, SaveMetadata, SaveVersion, CURRENT_SAVE_VERSION};
 pub use ids::{CharacterId, ItemDefinitionId, PersistentId, PersistentIdAllocator, WorldId};
 pub use map::{

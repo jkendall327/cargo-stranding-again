@@ -193,18 +193,19 @@ Goal: move from one fixed rectangle to deterministic, streamable world data.
 - [x] Make procedural generation deterministic by seed and chunk coordinate.
 - [x] Add chunk load boundaries around the camera or player.
   - Unloading is deliberately deferred while generated chunks stay in memory.
-- [ ] Add persistence for visited/modified chunks.
+- [x] Add persistence for visited/modified chunks.
   - [x] Add explicit saved chunk/tile schema types.
   - [x] Add runtime chunk <-> saved chunk round-trip tests.
-  - [ ] Start with a simple save directory or single save file.
-  - [ ] Persist only changed chunks if generation is deterministic.
+  - [x] Start with a simple save directory.
+  - [x] Persist loaded chunks as authoritative history.
+  - [ ] Later: persist only changed chunks if/when loaded chunk volume needs it.
 - [x] Update rendering to draw visible tiles across chunk boundaries.
 - [x] Update pathfinding/movement to query world coordinates, not fixed `0..width` / `0..height` assumptions.
-- [ ] Add tests.
+- [x] Add tests.
   - [x] Same seed + chunk coordinate produces same terrain.
   - [x] World coordinate lookup crosses chunk boundaries correctly.
   - [x] Modified chunk state round-trips through save/load model.
-  - [ ] Modified chunk state round-trips through filesystem save/load.
+  - [x] Chunk state round-trips through filesystem save/load.
 
 Current code pointers:
 
@@ -269,9 +270,9 @@ Current code pointers:
 
 Goal: add persistence before worldgen and cargo relationships become too large to reason about casually.
 
-- [ ] Decide save scope.
+- [x] Decide save scope.
   - [x] Split world and character save roots.
-  - [ ] Full world snapshot for early development.
+  - [x] Full loaded-world snapshot for early development.
   - [ ] Later: deterministic world seed plus changed chunks plus ECS entity state.
 - [x] Add serializable save structs instead of serializing ECS internals directly.
   - [x] Add versioned save envelope metadata.
@@ -279,7 +280,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
   - [x] Add map/chunk schema and conversions.
   - [x] Add player/character schema types.
   - [x] Add cargo/container/parcel schema types using persistent IDs.
-- [ ] Save core resources.
+- [x] Save core resources.
   - [x] simulation clock
   - [x] map/chunk seed and tile schema
   - [x] in-memory world save payload for loaded chunks and loose cargo
@@ -288,11 +289,15 @@ Goal: add persistence before worldgen and cargo relationships become too large t
   - [x] loose/player-carried/delivered cargo state
   - [x] NPC positions/jobs for current porter actors
 - [ ] Add load path in startup/debug menu.
-- [ ] Add round-trip tests.
+- [x] Add round-trip tests.
   - [x] generated/authored chunk state round-trips through save model
   - [x] loose cargo keeps identity, position, stats, and parcel state
   - [x] filesystem save/load round-trip
   - [x] save slot round-trips played state through filesystem storage
+- [x] Add migration scaffolding.
+  - [x] Current saves write v2.
+  - [x] v1 saves migrate to v2 as an explicit no-op.
+- [x] Add save eligibility helper.
 
 ## Useful Guardrails
 
