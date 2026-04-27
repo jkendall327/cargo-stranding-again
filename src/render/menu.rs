@@ -2,28 +2,42 @@ use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
 use crate::render::view_model::InventoryEntry;
-use crate::resources::{GameScreen, PauseMenuEntry, PauseMenuState};
+use crate::resources::{GameScreen, PauseMenuEntry, PauseMenuState, PersistenceStatus};
 
 pub(super) fn draw_game_state_overlay(world: &mut World) {
     match *world.resource::<GameScreen>() {
         GameScreen::Playing => {}
-        GameScreen::PauseMenu => draw_pause_menu(world.resource::<PauseMenuState>()),
+        GameScreen::PauseMenu => draw_pause_menu(
+            world.resource::<PauseMenuState>(),
+            world.resource::<PersistenceStatus>(),
+        ),
         GameScreen::InventoryMenu => draw_inventory_menu(world),
         GameScreen::OptionsMenu => draw_options_menu(),
     }
 }
 
-fn draw_pause_menu(menu: &PauseMenuState) {
-    draw_modal_panel(380.0, 250.0);
+fn draw_pause_menu(menu: &PauseMenuState, status: &PersistenceStatus) {
+    draw_modal_panel(560.0, 360.0);
 
-    let panel_x = (screen_width() - 380.0) / 2.0;
-    let mut y = (screen_height() - 250.0) / 2.0 + 58.0;
+    let panel_x = (screen_width() - 560.0) / 2.0;
+    let mut y = (screen_height() - 360.0) / 2.0 + 58.0;
     draw_text("Paused", panel_x + 42.0, y, 34.0, WHITE);
     y += 50.0;
 
     for entry in PauseMenuEntry::ALL {
         draw_menu_entry(panel_x + 42.0, y, entry.label(), menu.selected() == entry);
         y += 44.0;
+    }
+
+    if let Some(message) = &status.message {
+        y += 14.0;
+        draw_text(
+            message,
+            panel_x + 42.0,
+            y,
+            18.0,
+            Color::from_rgba(190, 204, 214, 255),
+        );
     }
 }
 

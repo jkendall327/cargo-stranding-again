@@ -31,13 +31,13 @@ impl SaveEligibility {
 /// Returns the current reason a player can or cannot save.
 ///
 /// The first rule is intentionally conservative: saving is allowed only while
-/// the player exists, gameplay simulation is active, and the player's transient
-/// motion state is settled.
+/// the player exists, the game is in a stable screen, and the player's
+/// transient motion state is settled.
 pub fn player_can_save(world: &mut World) -> SaveEligibility {
     let Some(screen) = world.get_resource::<GameScreen>().copied() else {
         return SaveEligibility::MissingGameScreen;
     };
-    if !screen.allows_simulation() {
+    if !screen.allows_saving() {
         return SaveEligibility::NotInGameplay { screen };
     }
 
@@ -99,15 +99,24 @@ mod tests {
     }
 
     #[test]
-    fn paused_game_cannot_save() {
+    fn paused_game_can_save_if_player_is_settled() {
         let mut world = World::new();
         init_world(&mut world);
         *world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
 
+        assert_eq!(player_can_save(&mut world), SaveEligibility::Eligible);
+    }
+
+    #[test]
+    fn inventory_menu_cannot_save() {
+        let mut world = World::new();
+        init_world(&mut world);
+        *world.resource_mut::<GameScreen>() = GameScreen::InventoryMenu;
+
         assert_eq!(
             player_can_save(&mut world),
             SaveEligibility::NotInGameplay {
-                screen: GameScreen::PauseMenu
+                screen: GameScreen::InventoryMenu
             }
         );
     }

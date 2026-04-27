@@ -1,11 +1,23 @@
+use std::path::PathBuf;
+
 use bevy_ecs::prelude::*;
 use macroquad::prelude::*;
 
+use crate::persistence::{
+    load_save_slot, player_can_save, save_slot, CharacterId, SaveEligibility, SaveSlotIds, WorldId,
+};
 use crate::render;
-use crate::resources::{GameScreen, PlayerIntent};
+use crate::resources::{
+    GameScreen, PersistenceAction, PersistenceIntent, PersistenceStatus, PlayerIntent,
+};
 use crate::schedules;
 use crate::simulation::SimulationRunner;
 use crate::world_setup::init_world;
+
+const DEBUG_SAVE_IDS: SaveSlotIds = SaveSlotIds {
+    world_id: WorldId(1),
+    character_id: CharacterId(1),
+};
 
 pub struct Game {
     world: World,
@@ -48,6 +60,7 @@ impl Game {
         // Each frame we copy only the compact input intent into an ECS resource.
         crate::input::copy_to_ecs(&mut self.world);
         self.menu_schedule.run(&mut self.world);
+        self.handle_persistence_intent();
         self.simulation
             .advance_after_player_action_if_spent(&mut self.world);
 
@@ -63,5 +76,81 @@ impl Game {
         // Rendering is deliberately a plain Macroquad function that manually
         // queries ECS state. This keeps drawing separate from deterministic sim.
         render::render(&mut self.world);
+    }
+
+    fn handle_persistence_intent(&mut self) {
+        let action = {
+            let mut intent = self.world.resource_mut::<PersistenceIntent>();
+            intent.action.take()
+        };
+
+        match action {
+            Some(PersistenceAction::SaveDebugSlot) => self.save_debug_slot(),
+            Some(PersistenceAction::LoadDebugSlot) => self.load_debug_slot(),
+            None => {}
+        }
+    }
+
+    fn save_debug_slot(&mut self) {
+        match player_can_save(&mut self.world) {
+            SaveEligibility::Eligible => {
+                let path = debug_save_path();
+                match save_slot(&path, &mut self.world, DEBUG_SAVE_IDS) {
+                    Ok(()) => set_persistence_status(
+                        &mut self.world,
+                        format!("Saved debug slot to {}", path.display()),
+                    ),
+                    Err(error) => {
+                        set_persistence_status(&mut self.world, format!("Save failed: {error:?}"))
+                    }
+                }
+            }
+            reason => set_persistence_status(
+                &mut self.world,
+                format!("Save blocked: {}", save_eligibility_label(reason)),
+            ),
+        }
+    }
+
+    fn load_debug_slot(&mut self) {
+        let path = debug_save_path();
+        match load_save_slot(&path, DEBUG_SAVE_IDS.character_id) {
+            Ok(loaded) => {
+                self.world = loaded.world;
+                self.simulation = SimulationRunner::new();
+                *self.world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
+                set_persistence_status(
+                    &mut self.world,
+                    format!("Loaded debug slot from {}", path.display()),
+                );
+            }
+            Err(error) => {
+                set_persistence_status(&mut self.world, format!("Load failed: {error:?}"))
+            }
+        }
+    }
+}
+
+fn debug_save_path() -> PathBuf {
+    PathBuf::from("saves").join("debug-slot")
+}
+
+fn set_persistence_status(world: &mut World, message: String) {
+    world.resource_mut::<PersistenceStatus>().message = Some(message);
+}
+
+fn save_eligibility_label(reason: SaveEligibility) -> String {
+    match reason {
+        SaveEligibility::Eligible => "eligible".to_owned(),
+        SaveEligibility::MissingGameScreen => "missing game screen".to_owned(),
+        SaveEligibility::NotInGameplay { screen } => format!("screen is {screen:?}"),
+        SaveEligibility::NoPlayer => "no player exists".to_owned(),
+        SaveEligibility::MultiplePlayers => "multiple players exist".to_owned(),
+        SaveEligibility::MissingPlayerVelocity => "player has no velocity".to_owned(),
+        SaveEligibility::MissingPlayerMomentum => "player has no momentum".to_owned(),
+        SaveEligibility::PlayerMoving { dx, dy } => format!("player is moving ({dx}, {dy})"),
+        SaveEligibility::PlayerHasMomentum { momentum } => {
+            format!("player has momentum {momentum:?}")
+        }
     }
 }

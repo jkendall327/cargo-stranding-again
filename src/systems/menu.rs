@@ -3,7 +3,7 @@ use bevy_ecs::prelude::*;
 use crate::cargo::player_carried_parcel_count;
 use crate::resources::{
     GameScreen, InventoryAction, InventoryIntent, InventoryMenuState, MenuAction, MenuInputState,
-    PauseMenuEntry, PauseMenuState,
+    PauseMenuEntry, PauseMenuState, PersistenceAction, PersistenceIntent,
 };
 
 pub fn menu_navigation(world: &mut World) {
@@ -33,6 +33,14 @@ pub fn menu_navigation(world: &mut World) {
         (GameScreen::PauseMenu, MenuAction::Confirm) => {
             match world.resource::<PauseMenuState>().selected() {
                 PauseMenuEntry::Resume => *world.resource_mut::<GameScreen>() = GameScreen::Playing,
+                PauseMenuEntry::SaveDebugSlot => {
+                    world.resource_mut::<PersistenceIntent>().action =
+                        Some(PersistenceAction::SaveDebugSlot);
+                }
+                PauseMenuEntry::LoadDebugSlot => {
+                    world.resource_mut::<PersistenceIntent>().action =
+                        Some(PersistenceAction::LoadDebugSlot);
+                }
                 PauseMenuEntry::Options => {
                     *world.resource_mut::<GameScreen>() = GameScreen::OptionsMenu
                 }
@@ -108,6 +116,7 @@ mod tests {
         world.insert_resource(PauseMenuState::default());
         world.insert_resource(InventoryMenuState::default());
         world.insert_resource(InventoryIntent::default());
+        world.insert_resource(PersistenceIntent::default());
         world.insert_resource(EnergyTimeline::default());
         world.insert_resource(crate::resources::DeliveryStats::default());
         crate::messages::init_simulation_messages(world);
@@ -174,7 +183,9 @@ mod tests {
             MenuAction::MoveSelectionDown,
         );
         let mut schedule = menu_with_inventory_resolution_schedule();
-        schedule.run(&mut world);
+        for _ in 0..3 {
+            schedule.run(&mut world);
+        }
         assert_eq!(
             world.resource::<PauseMenuState>().selected(),
             PauseMenuEntry::Options
@@ -186,6 +197,33 @@ mod tests {
         schedule.run(&mut world);
 
         assert_eq!(*world.resource::<GameScreen>(), GameScreen::OptionsMenu);
+    }
+
+    #[test]
+    fn pause_menu_confirm_can_request_debug_save() {
+        let mut world = World::new();
+
+        setup_menu_world(
+            &mut world,
+            GameScreen::PauseMenu,
+            MenuAction::MoveSelectionDown,
+        );
+        let mut schedule = menu_with_inventory_resolution_schedule();
+        schedule.run(&mut world);
+        assert_eq!(
+            world.resource::<PauseMenuState>().selected(),
+            PauseMenuEntry::SaveDebugSlot
+        );
+
+        world.insert_resource(MenuInputState {
+            action: Some(MenuAction::Confirm),
+        });
+        schedule.run(&mut world);
+
+        assert_eq!(
+            world.resource::<PersistenceIntent>().action,
+            Some(PersistenceAction::SaveDebugSlot)
+        );
     }
 
     #[test]

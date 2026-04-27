@@ -10,7 +10,8 @@ use crate::map::Map;
 use crate::persistence::{PersistentId, PersistentIdAllocator};
 use crate::resources::{
     Camera, CargoLossRisk, DeliveryStats, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
-    InventoryMenuState, MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
+    InventoryMenuState, MenuInputState, PauseMenuState, PersistenceIntent, PersistenceStatus,
+    PlayerIntent, SimulationClock,
 };
 
 const PLAYER_ID: PersistentId = PersistentId(1);
@@ -53,6 +54,8 @@ pub fn init_resources(world: &mut World, map: Map) {
     world.insert_resource(PauseMenuState::default());
     world.insert_resource(InventoryMenuState::default());
     world.insert_resource(InventoryIntent::default());
+    world.insert_resource(PersistenceIntent::default());
+    world.insert_resource(PersistenceStatus::default());
     world.insert_resource(EnergyTimeline::default());
     world.insert_resource(CargoLossRisk::default());
     world.insert_resource(Camera::default());

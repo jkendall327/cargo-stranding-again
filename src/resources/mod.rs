@@ -10,6 +10,6 @@ pub use input::{
 };
 pub use menu::{
     GameScreen, InventoryAction, InventoryIntent, InventoryMenuState, PauseMenuEntry,
-    PauseMenuState,
+    PauseMenuState, PersistenceAction, PersistenceIntent, PersistenceStatus,
 };
 pub use simulation::{CargoLossRisk, DeliveryStats, EnergyTimeline, SimulationClock};

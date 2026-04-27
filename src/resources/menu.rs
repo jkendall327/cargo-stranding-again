@@ -13,20 +13,33 @@ impl GameScreen {
     pub fn allows_simulation(self) -> bool {
         matches!(self, Self::Playing)
     }
+
+    pub fn allows_saving(self) -> bool {
+        matches!(self, Self::Playing | Self::PauseMenu)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PauseMenuEntry {
     Resume,
+    SaveDebugSlot,
+    LoadDebugSlot,
     Options,
 }
 
 impl PauseMenuEntry {
-    pub const ALL: [Self; 2] = [Self::Resume, Self::Options];
+    pub const ALL: [Self; 4] = [
+        Self::Resume,
+        Self::SaveDebugSlot,
+        Self::LoadDebugSlot,
+        Self::Options,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Resume => "Resume",
+            Self::SaveDebugSlot => "Save Debug Slot",
+            Self::LoadDebugSlot => "Load Debug Slot",
             Self::Options => "Options",
         }
     }
@@ -113,4 +126,21 @@ pub enum InventoryAction {
 #[derive(Resource, Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct InventoryIntent {
     pub action: Option<InventoryAction>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PersistenceAction {
+    SaveDebugSlot,
+    LoadDebugSlot,
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PersistenceIntent {
+    pub action: Option<PersistenceAction>,
+}
+
+/// Last save/load result shown by the debug menu.
+#[derive(Resource, Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistenceStatus {
+    pub message: Option<String>,
 }

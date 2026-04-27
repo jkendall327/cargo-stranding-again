@@ -268,36 +268,16 @@ Current code pointers:
 
 ## 11. Save/Load
 
-Goal: add persistence before worldgen and cargo relationships become too large to reason about casually.
+Status: persistence has a versioned world/character split, stable persistent IDs,
+chunk files, cargo/player/NPC save data, migration scaffolding, round-trip tests,
+and a pause-menu debug save/load flow.
 
-- [x] Decide save scope.
-  - [x] Split world and character save roots.
-  - [x] Full loaded-world snapshot for early development.
-  - [ ] Later: deterministic world seed plus changed chunks plus ECS entity state.
-- [x] Add serializable save structs instead of serializing ECS internals directly.
-  - [x] Add versioned save envelope metadata.
-  - [x] Add stable persistent ID types/components.
-  - [x] Add map/chunk schema and conversions.
-  - [x] Add player/character schema types.
-  - [x] Add cargo/container/parcel schema types using persistent IDs.
-- [x] Save core resources.
-  - [x] simulation clock
-  - [x] map/chunk seed and tile schema
-  - [x] in-memory world save payload for loaded chunks and loose cargo
-  - [x] map/chunk seed and loaded chunk tiles on disk
-  - [x] player position/stamina/load
-  - [x] loose/player-carried/delivered cargo state
-  - [x] NPC positions/jobs for current porter actors
-- [ ] Add load path in startup/debug menu.
-- [x] Add round-trip tests.
-  - [x] generated/authored chunk state round-trips through save model
-  - [x] loose cargo keeps identity, position, stats, and parcel state
-  - [x] filesystem save/load round-trip
-  - [x] save slot round-trips played state through filesystem storage
-- [x] Add migration scaffolding.
-  - [x] Current saves write v2.
-  - [x] v1 saves migrate to v2 as an explicit no-op.
-- [x] Add save eligibility helper.
+Minor/future work:
+
+- [ ] Replace the single debug slot with a real world/character picker.
+- [ ] Add save metadata for display names, timestamps, and build/debug labels.
+- [ ] Later: persist only changed chunks if loaded chunk volume needs it.
+- [ ] Later: support long-term world history with multiple characters per world.
 
 ## Useful Guardrails
 
