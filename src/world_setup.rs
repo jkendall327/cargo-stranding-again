@@ -7,14 +7,23 @@ use crate::components::*;
 use crate::energy::ActionEnergy;
 use crate::input::KeyBindings;
 use crate::map::Map;
+use crate::persistence::{PersistentId, PersistentIdAllocator};
 use crate::resources::{
     Camera, CargoLossRisk, DeliveryStats, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
     InventoryMenuState, MenuInputState, PauseMenuState, PlayerIntent, SimulationClock,
 };
 
+const PLAYER_ID: PersistentId = PersistentId(1);
+const PLAYER_CHEST_LOAD_ID: PersistentId = PersistentId(100);
+const PLAYER_BACKPACK_ID: PersistentId = PersistentId(101);
+const PORTER_ID_BASE: u128 = 1_000;
+const PORTER_PACK_ID_BASE: u128 = 1_100;
+const LOOSE_PARCEL_ID_BASE: u128 = 2_000;
+
 pub fn init_world(world: &mut World) {
     tracing::info!("initializing world");
 
+    world.insert_resource(PersistentIdAllocator::default());
     world.insert_resource(Map::generate());
     world.insert_resource(GameScreen::default());
     world.insert_resource(PlayerIntent::default());
@@ -35,6 +44,7 @@ pub fn init_world(world: &mut World) {
         .spawn((
             Actor,
             Player,
+            PLAYER_ID,
             Position { x: 6, y: 6 },
             Velocity::default(),
             Cargo { max_weight: 40.0 },
@@ -50,6 +60,7 @@ pub fn init_world(world: &mut World) {
 
     world.spawn((
         Item,
+        PLAYER_CHEST_LOAD_ID,
         CargoStats {
             weight: 12.0,
             volume: 0.0,
@@ -61,6 +72,7 @@ pub fn init_world(world: &mut World) {
     ));
     world.spawn((
         Item,
+        PLAYER_BACKPACK_ID,
         CargoStats {
             weight: 2.0,
             volume: 3.0,
@@ -81,6 +93,7 @@ pub fn init_world(world: &mut World) {
                 AutonomousActor,
                 WantsAction,
                 Porter { id },
+                PersistentId(PORTER_ID_BASE + id as u128),
                 Position { x, y },
                 Velocity::default(),
                 Cargo { max_weight: 35.0 },
@@ -93,6 +106,7 @@ pub fn init_world(world: &mut World) {
             .id();
         world.spawn((
             Item,
+            PersistentId(PORTER_PACK_ID_BASE + id as u128),
             CargoStats {
                 weight: 2.0,
                 volume: 3.0,
@@ -108,14 +122,18 @@ pub fn init_world(world: &mut World) {
         ));
     }
 
-    for (x, y, weight) in [
+    for (index, (x, y, weight)) in [
         (8, 8, 6.0),
         (18, 15, 9.0),
         (26, 33, 5.0),
         (36, 9, 8.0),
         (55, 19, 7.0),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         world.spawn((
+            PersistentId(LOOSE_PARCEL_ID_BASE + index as u128),
             Position { x, y },
             Item,
             CargoStats {
@@ -126,6 +144,8 @@ pub fn init_world(world: &mut World) {
             ParcelDelivery::Available,
         ));
     }
+    reserve_authored_persistent_ids(world);
+    debug_assert_unique_persistent_ids(world);
 
     tracing::info!(
         porters = 2,
@@ -134,4 +154,72 @@ pub fn init_world(world: &mut World) {
         player_y = 6,
         "world initialized"
     );
+}
+
+fn reserve_authored_persistent_ids(world: &mut World) {
+    let mut query = world.query::<&PersistentId>();
+    let ids = query.iter(world).copied().collect::<Vec<_>>();
+    let mut allocator = world.resource_mut::<PersistentIdAllocator>();
+    for id in ids {
+        allocator.reserve_existing(id);
+    }
+}
+
+fn debug_assert_unique_persistent_ids(world: &mut World) {
+    #[cfg(debug_assertions)]
+    {
+        use std::collections::HashMap;
+
+        let mut query = world.query::<(Entity, &PersistentId)>();
+        let mut seen = HashMap::new();
+        for (entity, id) in query.iter(world) {
+            let previous = seen.insert(*id, entity);
+            debug_assert!(
+                previous.is_none(),
+                "duplicate persistent ID {id:?} on entities {previous:?} and {entity:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::persistence::{save_world_data, WorldId};
+    use std::collections::HashSet;
+
+    #[test]
+    fn authored_persistent_entities_start_with_unique_ids() {
+        let mut world = World::new();
+        init_world(&mut world);
+
+        let mut query =
+            world.query::<(Entity, Option<&Actor>, Option<&Item>, Option<&PersistentId>)>();
+        let persistent_entities = query
+            .iter(&world)
+            .filter(|(_, actor, item, _)| actor.is_some() || item.is_some())
+            .collect::<Vec<_>>();
+
+        assert_eq!(persistent_entities.len(), 12);
+        assert!(
+            persistent_entities.iter().all(|(_, _, _, id)| id.is_some()),
+            "all authored actors and cargo items should have persistent IDs"
+        );
+
+        let unique_ids = persistent_entities
+            .iter()
+            .filter_map(|(_, _, _, id)| id.copied())
+            .collect::<HashSet<_>>();
+        assert_eq!(unique_ids.len(), persistent_entities.len());
+    }
+
+    #[test]
+    fn initial_world_can_build_world_save_payload() {
+        let mut world = World::new();
+        init_world(&mut world);
+
+        let saved = save_world_data(&mut world, WorldId(1)).expect("initial world should save");
+
+        assert_eq!(saved.world_entities.len(), 5);
+    }
 }

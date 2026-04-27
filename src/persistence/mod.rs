@@ -18,7 +18,7 @@ pub use cargo::{
     SavedParcelState,
 };
 pub use envelope::{Save, SaveKind, SaveMetadata, SaveVersion, CURRENT_SAVE_VERSION};
-pub use ids::{CharacterId, ItemDefinitionId, PersistentId, WorldId};
+pub use ids::{CharacterId, ItemDefinitionId, PersistentId, PersistentIdAllocator, WorldId};
 pub use map::{
     SavedChunk, SavedChunkCoord, SavedChunkError, SavedMapBounds, SavedTerrain, SavedTile,
 };
