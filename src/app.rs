@@ -116,8 +116,7 @@ impl Game {
         let path = debug_save_path();
         match load_save_slot(&path, DEBUG_SAVE_IDS.character_id) {
             Ok(loaded) => {
-                self.world = loaded.world;
-                self.simulation = SimulationRunner::new();
+                self.install_loaded_world(loaded.world);
                 *self.world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
                 set_persistence_status(
                     &mut self.world,
@@ -128,6 +127,14 @@ impl Game {
                 set_persistence_status(&mut self.world, format!("Load failed: {error:?}"))
             }
         }
+    }
+
+    /// Installs a fresh ECS world and rebuilds every schedule that may have
+    /// cached system state for the previous Bevy `WorldId`.
+    fn install_loaded_world(&mut self, world: World) {
+        self.world = world;
+        self.simulation = SimulationRunner::new();
+        self.menu_schedule = schedules::menu_schedule();
     }
 }
 
@@ -152,5 +159,25 @@ fn save_eligibility_label(reason: SaveEligibility) -> String {
         SaveEligibility::PlayerHasMomentum { momentum } => {
             format!("player has momentum {momentum:?}")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loaded_world_rebuilds_world_bound_menu_schedule() {
+        let mut game = Game::new();
+        game.menu_schedule.run(&mut game.world);
+
+        let mut loaded_world = World::new();
+        init_world(&mut loaded_world);
+        game.install_loaded_world(loaded_world);
+
+        *game.world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
+        game.menu_schedule.run(&mut game.world);
+
+        assert_eq!(*game.world.resource::<GameScreen>(), GameScreen::PauseMenu);
     }
 }
