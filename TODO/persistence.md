@@ -325,7 +325,7 @@ to remain shaped like old save files forever.
    - [x] Add character file storage round-trip.
    - [x] Add single-world/single-character save commands.
 7. [ ] Add save eligibility helper.
-8. [ ] Add migration scaffolding before the second save version exists.
+8. [x] Add migration scaffolding before the second save version exists.
 
 The first useful test should prove that modified/generated chunk state
 round-trips exactly. The second should prove that loose cargo keeps identity,

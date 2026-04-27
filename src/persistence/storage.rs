@@ -6,8 +6,8 @@ use std::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{
-    CharacterId, Save, SaveKind, SavedCharacterData, SavedChunk, SavedChunkCoord, SavedEntity,
-    SavedWorldData, WorldId,
+    migrate_save, CharacterId, Save, SaveKind, SaveMigrationError, SaveVersion, SavedCharacterData,
+    SavedChunk, SavedChunkCoord, SavedEntity, SavedWorldData, WorldId,
 };
 
 const WORLD_MANIFEST_FILE: &str = "world.ron";
@@ -32,6 +32,9 @@ pub enum SaveDirectoryError {
     UnexpectedKind {
         expected: SaveKind,
         actual: SaveKind,
+    },
+    UnsupportedVersion {
+        version: SaveVersion,
     },
 }
 
@@ -101,13 +104,13 @@ pub fn read_world_directory(
 ) -> Result<Save<SavedWorldData>, SaveDirectoryError> {
     let path = path.as_ref();
     let manifest_path = path.join(WORLD_MANIFEST_FILE);
-    let manifest: Save<SavedWorldManifest> = read_ron(&manifest_path)?;
+    let manifest: Save<SavedWorldManifest> = read_save_ron(&manifest_path)?;
     ensure_kind(manifest.metadata.kind, SaveKind::World)?;
 
     let chunk_dir = path.join(CHUNK_DIRECTORY);
     let mut chunks = Vec::new();
     for coord in &manifest.payload.chunks {
-        let chunk_save: Save<SavedChunk> = read_ron(&chunk_path(&chunk_dir, *coord))?;
+        let chunk_save: Save<SavedChunk> = read_save_ron(&chunk_path(&chunk_dir, *coord))?;
         ensure_kind(chunk_save.metadata.kind, SaveKind::Chunk)?;
         chunks.push(chunk_save.payload);
     }
@@ -150,7 +153,8 @@ pub fn read_character_file(
     character_id: CharacterId,
 ) -> Result<Save<SavedCharacterData>, SaveDirectoryError> {
     let character_dir = world_path.as_ref().join(CHARACTER_DIRECTORY);
-    let save: Save<SavedCharacterData> = read_ron(&character_path(&character_dir, character_id))?;
+    let save: Save<SavedCharacterData> =
+        read_save_ron(&character_path(&character_dir, character_id))?;
     ensure_kind(save.metadata.kind, SaveKind::Character)?;
     Ok(save)
 }
@@ -195,6 +199,21 @@ fn read_ron<T: DeserializeOwned>(path: &Path) -> Result<T, SaveDirectoryError> {
     })
 }
 
+fn read_save_ron<T: DeserializeOwned>(path: &Path) -> Result<Save<T>, SaveDirectoryError> {
+    let save = read_ron(path)?;
+    migrate_save(save).map_err(SaveDirectoryError::from)
+}
+
+impl From<SaveMigrationError> for SaveDirectoryError {
+    fn from(error: SaveMigrationError) -> Self {
+        match error {
+            SaveMigrationError::UnsupportedVersion { version } => {
+                SaveDirectoryError::UnsupportedVersion { version }
+            }
+        }
+    }
+}
+
 fn chunk_path(chunk_dir: &Path, coord: SavedChunkCoord) -> PathBuf {
     chunk_dir.join(format!("{}_{}.ron", coord.x, coord.y))
 }
@@ -209,8 +228,9 @@ mod tests {
 
     use super::*;
     use crate::persistence::{
-        ItemDefinitionId, PersistentId, SavedActionEnergy, SavedActorState, SavedCargoItem,
-        SavedCargoLocation, SavedCargoStats, SavedMovementMode, SavedParcelState, SavedPlayer,
+        ItemDefinitionId, PersistentId, SaveMetadata, SavedActionEnergy, SavedActorState,
+        SavedCargoItem, SavedCargoLocation, SavedCargoStats, SavedMovementMode, SavedParcelState,
+        SavedPlayer, CURRENT_SAVE_VERSION,
     };
 
     #[test]
@@ -257,6 +277,54 @@ mod tests {
     }
 
     #[test]
+    fn v1_world_directory_migrates_to_current_version() {
+        let root = temp_save_dir("v1_world_directory_migrates_to_current_version");
+        let chunk_dir = root.join(CHUNK_DIRECTORY);
+        create_dir_all(&chunk_dir).expect("test chunk directory should exist");
+        let chunk = SavedChunk::from(&crate::map::generate_chunk(
+            123,
+            crate::map::ChunkCoord::new(-1, 2),
+        ));
+        let metadata = SaveMetadata {
+            version: SaveVersion::new(1),
+            kind: SaveKind::World,
+        };
+        let manifest = Save {
+            metadata,
+            payload: SavedWorldManifest {
+                world_id: WorldId(5),
+                seed: 123,
+                bounds: crate::map::MapBounds::new(-16, 0, 32, 16).into(),
+                depot_x: 8,
+                depot_y: 8,
+                turn: 12,
+                timeline: 345,
+                delivered_parcels: 1,
+                chunks: vec![chunk.coord],
+                world_entities: vec![],
+            },
+        };
+        let chunk_save = Save {
+            metadata: SaveMetadata {
+                version: SaveVersion::new(1),
+                kind: SaveKind::Chunk,
+            },
+            payload: chunk.clone(),
+        };
+        write_ron(&root.join(WORLD_MANIFEST_FILE), &manifest).expect("v1 manifest should write");
+        write_ron(&chunk_path(&chunk_dir, chunk.coord), &chunk_save)
+            .expect("v1 chunk should write");
+
+        let restored = read_world_directory(&root).expect("v1 world directory should migrate");
+
+        assert_eq!(restored.metadata.version, CURRENT_SAVE_VERSION);
+        assert_eq!(restored.payload.world_id, WorldId(5));
+        assert_eq!(restored.payload.chunks, vec![chunk]);
+
+        fs::remove_dir_all(root).expect("test save directory should clean up");
+    }
+
+    #[test]
     fn character_file_round_trips_under_world_directory() {
         let root = temp_save_dir("character_file_round_trips_under_world_directory");
         let save = Save::new(
@@ -289,6 +357,49 @@ mod tests {
 
         assert_eq!(restored, save);
         assert!(root.join(CHARACTER_DIRECTORY).join("7.ron").is_file());
+
+        fs::remove_dir_all(root).expect("test save directory should clean up");
+    }
+
+    #[test]
+    fn v1_character_file_migrates_to_current_version() {
+        let root = temp_save_dir("v1_character_file_migrates_to_current_version");
+        let character_dir = root.join(CHARACTER_DIRECTORY);
+        create_dir_all(&character_dir).expect("test character directory should exist");
+        let save = Save {
+            metadata: SaveMetadata {
+                version: SaveVersion::new(1),
+                kind: SaveKind::Character,
+            },
+            payload: SavedCharacterData {
+                character_id: CharacterId(7),
+                world_id: WorldId(5),
+                player: SavedPlayer {
+                    actor: SavedActorState {
+                        id: PersistentId(1),
+                        x: 9,
+                        y: -2,
+                        cargo_max_weight: 40.0,
+                        stamina_current: 21.0,
+                        stamina_max: 35.0,
+                        action_energy: SavedActionEnergy {
+                            ready_at: 30,
+                            last_cost: 100,
+                        },
+                    },
+                    movement_mode: SavedMovementMode::Steady,
+                },
+                carried_entities: vec![],
+            },
+        };
+        write_ron(&character_path(&character_dir, CharacterId(7)), &save)
+            .expect("v1 character should write");
+
+        let restored =
+            read_character_file(&root, CharacterId(7)).expect("v1 character should migrate");
+
+        assert_eq!(restored.metadata.version, CURRENT_SAVE_VERSION);
+        assert_eq!(restored.payload, save.payload);
 
         fs::remove_dir_all(root).expect("test save directory should clean up");
     }

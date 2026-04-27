@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Current save schema version written by new saves.
-pub const CURRENT_SAVE_VERSION: SaveVersion = SaveVersion::new(1);
+pub const CURRENT_SAVE_VERSION: SaveVersion = SaveVersion::new(2);
 
 /// Small metadata wrapper around a typed save payload.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

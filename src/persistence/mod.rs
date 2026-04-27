@@ -8,6 +8,7 @@ mod cargo;
 mod envelope;
 mod ids;
 mod map;
+mod migration;
 mod player;
 mod runtime;
 mod slot;
@@ -23,6 +24,7 @@ pub use ids::{CharacterId, ItemDefinitionId, PersistentId, PersistentIdAllocator
 pub use map::{
     SavedChunk, SavedChunkCoord, SavedChunkError, SavedMapBounds, SavedTerrain, SavedTile,
 };
+pub use migration::{migrate_save, SaveMigrationError};
 pub use player::{SavedActorState, SavedCharacterData, SavedMovementMode, SavedPlayer};
 pub use runtime::{
     save_character_data, save_loose_cargo, save_world_data, spawn_saved_character_data,
