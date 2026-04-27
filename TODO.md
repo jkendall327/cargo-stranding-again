@@ -280,18 +280,19 @@ Goal: add persistence before worldgen and cargo relationships become too large t
   - [x] Add player/character schema types.
   - [x] Add cargo/container/parcel schema types using persistent IDs.
 - [ ] Save core resources.
-  - [ ] simulation clock
+  - [x] simulation clock
   - [x] map/chunk seed and tile schema
   - [x] in-memory world save payload for loaded chunks and loose cargo
   - [x] map/chunk seed and loaded chunk tiles on disk
   - [x] player position/stamina/load
-  - [ ] loose/carried/delivered cargo state
-  - [ ] NPC positions/jobs
+  - [x] loose/player-carried/delivered cargo state
+  - [x] NPC positions/jobs for current porter actors
 - [ ] Add load path in startup/debug menu.
 - [ ] Add round-trip tests.
   - [x] generated/authored chunk state round-trips through save model
   - [x] loose cargo keeps identity, position, stats, and parcel state
   - [x] filesystem save/load round-trip
+  - [x] save slot round-trips played state through filesystem storage
 
 ## Useful Guardrails
 

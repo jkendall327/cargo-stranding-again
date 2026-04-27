@@ -43,6 +43,12 @@ pub enum SaveDirectoryError {
 struct SavedWorldManifest {
     world_id: WorldId,
     seed: u64,
+    bounds: super::SavedMapBounds,
+    depot_x: i32,
+    depot_y: i32,
+    turn: u64,
+    timeline: u64,
+    delivered_parcels: u32,
     chunks: Vec<SavedChunkCoord>,
     world_entities: Vec<SavedEntity>,
 }
@@ -64,6 +70,12 @@ pub fn write_world_directory(
         payload: SavedWorldManifest {
             world_id: save.payload.world_id,
             seed: save.payload.seed,
+            bounds: save.payload.bounds,
+            depot_x: save.payload.depot_x,
+            depot_y: save.payload.depot_y,
+            turn: save.payload.turn,
+            timeline: save.payload.timeline,
+            delivered_parcels: save.payload.delivered_parcels,
             chunks: save
                 .payload
                 .chunks
@@ -105,6 +117,12 @@ pub fn read_world_directory(
         payload: SavedWorldData {
             world_id: manifest.payload.world_id,
             seed: manifest.payload.seed,
+            bounds: manifest.payload.bounds,
+            depot_x: manifest.payload.depot_x,
+            depot_y: manifest.payload.depot_y,
+            turn: manifest.payload.turn,
+            timeline: manifest.payload.timeline,
+            delivered_parcels: manifest.payload.delivered_parcels,
             chunks,
             world_entities: manifest.payload.world_entities,
         },
@@ -207,6 +225,12 @@ mod tests {
             SavedWorldData {
                 world_id: WorldId(5),
                 seed: 123,
+                bounds: crate::map::MapBounds::new(-16, 0, 32, 16).into(),
+                depot_x: 8,
+                depot_y: 8,
+                turn: 12,
+                timeline: 345,
+                delivered_parcels: 1,
                 chunks: vec![chunk],
                 world_entities: vec![SavedEntity::CargoItem(SavedCargoItem {
                     id: PersistentId(9),

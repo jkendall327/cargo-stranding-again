@@ -323,7 +323,7 @@ to remain shaped like old save files forever.
 6. [ ] Add world directory layout and single-world/single-character save commands.
    - [x] Add RON world manifest plus per-chunk filesystem round-trip.
    - [x] Add character file storage round-trip.
-   - [ ] Add single-world/single-character save commands.
+   - [x] Add single-world/single-character save commands.
 7. [ ] Add save eligibility helper.
 8. [ ] Add migration scaffolding before the second save version exists.
 
@@ -341,6 +341,10 @@ Current status:
   filesystem storage.
 - Character persistence saves and loads player actor state plus player-carried
   cargo/container relationships through explicit save structs.
+- Save-slot persistence writes the world and character roots together and can
+  reload a played headless state from disk.
+- Current porter NPC state, job phase, and parcel reservations persist as
+  world-owned state.
 - Runtime `Chunk` exposes row-major tile snapshots and can be rebuilt from
   complete tile snapshots with an explicit tile-count error.
 - Generated and authored chunk data have tests proving exact schema round-trip,

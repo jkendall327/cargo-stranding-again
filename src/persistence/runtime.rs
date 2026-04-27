@@ -7,16 +7,19 @@ use crate::cargo::{
     ParcelDelivery,
 };
 use crate::components::{
-    ActionEnergy, Actor, Momentum, MovementState, Player, Position, Stamina, Velocity,
+    ActionEnergy, Actor, AssignedJob, AutonomousActor, JobPhase, Momentum, MovementState, Player,
+    Porter, Position, Stamina, Velocity, WantsAction,
 };
 use crate::map::Map;
+use crate::map::{Chunk, TileCoord};
 use crate::movement::MovementMode;
+use crate::resources::{DeliveryStats, EnergyTimeline, SimulationClock};
 
 use super::{
     CharacterId, ItemDefinitionId, PersistentId, SavedActionEnergy, SavedActorState,
     SavedCargoItem, SavedCargoLocation, SavedCargoStats, SavedCarrySlot, SavedCharacterData,
-    SavedContainerState, SavedEntity, SavedMovementMode, SavedParcelState, SavedPlayer,
-    SavedWorldData, WorldId,
+    SavedContainerState, SavedEntity, SavedJobPhase, SavedMovementMode, SavedParcelState,
+    SavedPlayer, SavedPorter, SavedWorldData, WorldId,
 };
 
 const GENERIC_ITEM_DEFINITION_ID: &str = "item.generic";
@@ -28,6 +31,13 @@ const GENERIC_PARCEL_DEFINITION_ID: &str = "parcel.generic";
 pub enum CargoSaveError {
     MissingPersistentId { entity: Entity },
     ReservedByMissingPersistentId { entity: Entity },
+}
+
+/// Error produced while translating autonomous actors into save data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActorSaveError {
+    MissingPersistentId { entity: Entity },
+    JobParcelMissingPersistentId { entity: Entity },
 }
 
 /// Error produced while rebuilding runtime cargo from explicit save data.
@@ -61,6 +71,14 @@ pub enum CharacterLoadError {
 pub enum WorldSaveError {
     MissingMap,
     Cargo(CargoSaveError),
+    Actor(ActorSaveError),
+}
+
+/// Error produced while rebuilding world-owned runtime state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldLoadError {
+    Chunk(super::SavedChunkError),
+    Cargo(CargoLoadError),
 }
 
 /// Builds the character-owned save payload from the current player entity.
@@ -115,18 +133,142 @@ pub fn save_world_data(
         .get_resource::<Map>()
         .ok_or(WorldSaveError::MissingMap)?;
     let seed = map.seed;
+    let bounds = map.bounds();
+    let depot = map.depot_coord();
+    let turn = world
+        .get_resource::<SimulationClock>()
+        .map_or(0, |clock| clock.turn);
+    let timeline = world
+        .get_resource::<EnergyTimeline>()
+        .map_or(0, |timeline| timeline.now);
+    let delivered_parcels = world
+        .get_resource::<DeliveryStats>()
+        .map_or(0, |stats| stats.delivered_parcels);
     let chunks = map.loaded_chunks().map(Into::into).collect::<Vec<_>>();
-    let world_entities = save_loose_cargo(world)?
+    let mut world_entities = save_porters(world)?
         .into_iter()
-        .map(SavedEntity::CargoItem)
-        .collect();
+        .map(SavedEntity::Porter)
+        .collect::<Vec<_>>();
+    world_entities.extend(
+        save_loose_cargo(world)?
+            .into_iter()
+            .map(SavedEntity::CargoItem),
+    );
 
     Ok(SavedWorldData {
         world_id,
         seed,
+        bounds: bounds.into(),
+        depot_x: depot.x,
+        depot_y: depot.y,
+        turn,
+        timeline,
+        delivered_parcels,
         chunks,
         world_entities,
     })
+}
+
+/// Rebuilds world-owned runtime resources and entities from save data.
+///
+/// This first load slice restores the map and loose world cargo. NPC actor
+/// state is still deferred, so saved cargo that references missing world actors
+/// will fail loudly instead of silently dropping the relationship.
+pub fn spawn_saved_world_data(
+    world: &mut World,
+    save: &SavedWorldData,
+) -> Result<HashMap<PersistentId, Entity>, WorldLoadError> {
+    spawn_saved_world_data_with_entities(world, save, &HashMap::new())
+}
+
+pub(crate) fn spawn_saved_world_data_with_entities(
+    world: &mut World,
+    save: &SavedWorldData,
+    entity_by_id: &HashMap<PersistentId, Entity>,
+) -> Result<HashMap<PersistentId, Entity>, WorldLoadError> {
+    let chunks = save
+        .chunks
+        .iter()
+        .map(Chunk::try_from)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(WorldLoadError::Chunk)?;
+    let map = Map::from_loaded_chunks(
+        save.seed,
+        save.bounds.into(),
+        TileCoord::new(save.depot_x, save.depot_y),
+        chunks,
+    );
+    world.insert_resource(map);
+    world.insert_resource(SimulationClock { turn: save.turn });
+    world.insert_resource(EnergyTimeline { now: save.timeline });
+    world.insert_resource(DeliveryStats {
+        delivered_parcels: save.delivered_parcels,
+    });
+
+    let mut entity_by_id = entity_by_id.clone();
+    for entity in &save.world_entities {
+        if let SavedEntity::Porter(porter) = entity {
+            let spawned = spawn_saved_porter(world, porter);
+            entity_by_id.insert(porter.id, spawned);
+        }
+    }
+
+    let cargo = save
+        .world_entities
+        .iter()
+        .filter_map(|entity| match entity {
+            SavedEntity::CargoItem(item) => Some(item.clone()),
+            SavedEntity::Porter(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let spawned_cargo =
+        spawn_saved_loose_cargo(world, &cargo, &entity_by_id).map_err(WorldLoadError::Cargo)?;
+    entity_by_id.extend(spawned_cargo);
+    restore_saved_porter_jobs(world, &save.world_entities, &entity_by_id)?;
+    Ok(entity_by_id)
+}
+
+fn save_porters(world: &mut World) -> Result<Vec<SavedPorter>, WorldSaveError> {
+    let mut query = world.query_filtered::<(
+        Entity,
+        Option<&PersistentId>,
+        &Porter,
+        &Position,
+        &Cargo,
+        &ActionEnergy,
+        &AssignedJob,
+    ), With<AutonomousActor>>();
+
+    let mut porters = Vec::new();
+    for (entity, persistent_id, porter, position, cargo, energy, job) in query.iter(world) {
+        let id = persistent_id.copied().ok_or(WorldSaveError::Actor(
+            ActorSaveError::MissingPersistentId { entity },
+        ))?;
+        let job_parcel = job
+            .parcel
+            .map(|parcel| {
+                world
+                    .get::<PersistentId>(parcel)
+                    .copied()
+                    .ok_or(WorldSaveError::Actor(
+                        ActorSaveError::JobParcelMissingPersistentId { entity: parcel },
+                    ))
+            })
+            .transpose()?;
+        porters.push(SavedPorter {
+            id,
+            porter_id: porter.id,
+            x: position.x,
+            y: position.y,
+            cargo_max_weight: cargo.max_weight,
+            action_energy: (*energy).into(),
+            job_phase: job.phase.into(),
+            job_parcel,
+        });
+    }
+
+    porters.sort_by_key(|porter| porter.id.0);
+    Ok(porters)
 }
 
 /// Converts currently loose cargo entities into world-owned save payloads.
@@ -438,6 +580,61 @@ fn spawn_saved_player(world: &mut World, saved: SavedPlayer) -> Entity {
         .id()
 }
 
+fn spawn_saved_porter(world: &mut World, saved: &SavedPorter) -> Entity {
+    world
+        .spawn((
+            Actor,
+            AutonomousActor,
+            WantsAction,
+            Porter {
+                id: saved.porter_id,
+            },
+            saved.id,
+            Position {
+                x: saved.x,
+                y: saved.y,
+            },
+            Velocity::default(),
+            Cargo {
+                max_weight: saved.cargo_max_weight,
+            },
+            AssignedJob {
+                phase: saved.job_phase.into(),
+                parcel: None,
+            },
+            ActionEnergy::from(saved.action_energy),
+        ))
+        .id()
+}
+
+fn restore_saved_porter_jobs(
+    world: &mut World,
+    saved_entities: &[SavedEntity],
+    entity_by_id: &HashMap<PersistentId, Entity>,
+) -> Result<(), WorldLoadError> {
+    for entity in saved_entities {
+        let SavedEntity::Porter(porter) = entity else {
+            continue;
+        };
+        let porter_entity = entity_by_id[&porter.id];
+        let job_parcel = porter
+            .job_parcel
+            .map(|parcel| {
+                entity_by_id.get(&parcel).copied().ok_or({
+                    WorldLoadError::Cargo(CargoLoadError::ReservedByMissingEntity {
+                        id: porter.id,
+                        holder: parcel,
+                    })
+                })
+            })
+            .transpose()?;
+        if let Some(mut job) = world.get_mut::<AssignedJob>(porter_entity) {
+            job.parcel = job_parcel;
+        }
+    }
+    Ok(())
+}
+
 fn player_carried_container_ids(
     world: &mut World,
     holder: Entity,
@@ -552,6 +749,28 @@ impl From<SavedMovementMode> for MovementMode {
             SavedMovementMode::Walking => Self::Walking,
             SavedMovementMode::Sprinting => Self::Sprinting,
             SavedMovementMode::Steady => Self::Steady,
+        }
+    }
+}
+
+impl From<JobPhase> for SavedJobPhase {
+    fn from(phase: JobPhase) -> Self {
+        match phase {
+            JobPhase::FindParcel => Self::FindParcel,
+            JobPhase::GoToParcel => Self::GoToParcel,
+            JobPhase::GoToDepot => Self::GoToDepot,
+            JobPhase::Done => Self::Done,
+        }
+    }
+}
+
+impl From<SavedJobPhase> for JobPhase {
+    fn from(phase: SavedJobPhase) -> Self {
+        match phase {
+            SavedJobPhase::FindParcel => Self::FindParcel,
+            SavedJobPhase::GoToParcel => Self::GoToParcel,
+            SavedJobPhase::GoToDepot => Self::GoToDepot,
+            SavedJobPhase::Done => Self::Done,
         }
     }
 }
@@ -716,7 +935,14 @@ mod tests {
             (a.x, a.y) <= (b.x, b.y)
         }));
         assert_eq!(saved.world_entities.len(), 1);
-        let SavedEntity::CargoItem(saved_cargo) = &saved.world_entities[0];
+        let saved_cargo = saved
+            .world_entities
+            .iter()
+            .find_map(|entity| match entity {
+                SavedEntity::CargoItem(cargo) => Some(cargo),
+                SavedEntity::Porter(_) => None,
+            })
+            .expect("world save should include loose cargo");
         assert_eq!(saved_cargo.id, cargo_id);
         assert_eq!(
             saved_cargo.location,

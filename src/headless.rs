@@ -85,7 +85,7 @@ pub struct HeadlessSnapshot {
 }
 
 impl HeadlessSnapshot {
-    fn from_world(world: &mut World) -> Option<Self> {
+    pub fn from_world(world: &mut World) -> Option<Self> {
         let clock = *world.resource::<SimulationClock>();
         let delivery_stats = *world.resource::<DeliveryStats>();
         let timeline = world.resource::<EnergyTimeline>().now;

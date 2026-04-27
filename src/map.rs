@@ -497,6 +497,35 @@ impl Map {
         }
     }
 
+    /// Rebuilds a map from saved chunk history and explicit finite bounds.
+    ///
+    /// Persistence owns the schema conversion into `Chunk`; this constructor
+    /// keeps the map invariant that tile lookups are bounded by one coherent
+    /// world rectangle while allowing saved chunks to be authoritative.
+    pub(crate) fn from_loaded_chunks<I>(
+        seed: u64,
+        bounds: MapBounds,
+        depot: TileCoord,
+        chunks: I,
+    ) -> Self
+    where
+        I: IntoIterator<Item = Chunk>,
+    {
+        let loaded_chunks = chunks
+            .into_iter()
+            .map(|chunk| (chunk.coord(), chunk))
+            .collect();
+        Self {
+            min_x: bounds.min_x,
+            min_y: bounds.min_y,
+            width: bounds.width,
+            height: bounds.height,
+            seed,
+            loaded_chunks,
+            depot,
+        }
+    }
+
     /// Loads neighboring chunks when `coord` gets close to a loaded edge.
     pub fn stream_chunks_near(&mut self, coord: TileCoord) -> usize {
         self.stream_chunks_near_with_margin(coord, CHUNK_STREAM_MARGIN_TILES)

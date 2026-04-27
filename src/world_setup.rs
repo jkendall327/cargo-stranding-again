@@ -23,8 +23,28 @@ const LOOSE_PARCEL_ID_BASE: u128 = 2_000;
 pub fn init_world(world: &mut World) {
     tracing::info!("initializing world");
 
+    init_resources(world, Map::generate());
+    spawn_authored_entities(world);
+    reserve_existing_persistent_ids(world);
+    debug_assert_unique_persistent_ids(world);
+
+    tracing::info!(
+        porters = 2,
+        parcels = 5,
+        player_x = 6,
+        player_y = 6,
+        "world initialized"
+    );
+}
+
+/// Inserts the non-entity resources needed by the windowed and headless game.
+///
+/// Save loading uses this with a restored map before spawning saved entities,
+/// so the loaded world has the same input, UI, timeline, and message resources
+/// as a freshly authored game.
+pub fn init_resources(world: &mut World, map: Map) {
     world.insert_resource(PersistentIdAllocator::default());
-    world.insert_resource(Map::generate());
+    world.insert_resource(map);
     world.insert_resource(GameScreen::default());
     world.insert_resource(PlayerIntent::default());
     world.insert_resource(MenuInputState::default());
@@ -39,7 +59,9 @@ pub fn init_world(world: &mut World) {
     world.insert_resource(SimulationClock { turn: 0 });
     world.insert_resource(DeliveryStats::default());
     crate::messages::init_simulation_messages(world);
+}
 
+fn spawn_authored_entities(world: &mut World) {
     let player_entity = world
         .spawn((
             Actor,
@@ -144,19 +166,9 @@ pub fn init_world(world: &mut World) {
             ParcelDelivery::Available,
         ));
     }
-    reserve_authored_persistent_ids(world);
-    debug_assert_unique_persistent_ids(world);
-
-    tracing::info!(
-        porters = 2,
-        parcels = 5,
-        player_x = 6,
-        player_y = 6,
-        "world initialized"
-    );
 }
 
-fn reserve_authored_persistent_ids(world: &mut World) {
+pub fn reserve_existing_persistent_ids(world: &mut World) {
     let mut query = world.query::<&PersistentId>();
     let ids = query.iter(world).copied().collect::<Vec<_>>();
     let mut allocator = world.resource_mut::<PersistentIdAllocator>();
@@ -220,6 +232,6 @@ mod tests {
 
         let saved = save_world_data(&mut world, WorldId(1)).expect("initial world should save");
 
-        assert_eq!(saved.world_entities.len(), 5);
+        assert_eq!(saved.world_entities.len(), 7);
     }
 }
