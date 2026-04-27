@@ -3,14 +3,20 @@ use std::collections::HashMap;
 use bevy_ecs::prelude::*;
 
 use crate::cargo::{
-    CargoParcel, CargoStats, CarriedBy, CarrySlot, ContainedIn, Container, Item, ParcelDelivery,
+    Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, ContainedIn, Container, Item,
+    ParcelDelivery,
 };
-use crate::components::Position;
+use crate::components::{
+    ActionEnergy, Actor, Momentum, MovementState, Player, Position, Stamina, Velocity,
+};
 use crate::map::Map;
+use crate::movement::MovementMode;
 
 use super::{
-    ItemDefinitionId, PersistentId, SavedCargoItem, SavedCargoLocation, SavedCargoStats,
-    SavedCarrySlot, SavedContainerState, SavedEntity, SavedParcelState, SavedWorldData, WorldId,
+    CharacterId, ItemDefinitionId, PersistentId, SavedActionEnergy, SavedActorState,
+    SavedCargoItem, SavedCargoLocation, SavedCargoStats, SavedCarrySlot, SavedCharacterData,
+    SavedContainerState, SavedEntity, SavedMovementMode, SavedParcelState, SavedPlayer,
+    SavedWorldData, WorldId,
 };
 
 const GENERIC_ITEM_DEFINITION_ID: &str = "item.generic";
@@ -36,11 +42,64 @@ pub enum CargoLoadError {
     },
 }
 
+/// Error produced while translating the player character into save data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharacterSaveError {
+    NoPlayer,
+    MissingPersistentId { entity: Entity },
+    Cargo(CargoSaveError),
+}
+
+/// Error produced while rebuilding a saved player character.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharacterLoadError {
+    Cargo(CargoLoadError),
+}
+
 /// Error produced while building a world-owned save payload from ECS state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WorldSaveError {
     MissingMap,
     Cargo(CargoSaveError),
+}
+
+/// Builds the character-owned save payload from the current player entity.
+///
+/// Character saves own the player's actor state and whatever cargo is currently
+/// attached to the player, including items inside player-carried containers.
+pub fn save_character_data(
+    world: &mut World,
+    character_id: CharacterId,
+    world_id: WorldId,
+) -> Result<SavedCharacterData, CharacterSaveError> {
+    let (player_entity, actor, movement_mode) = saved_player_state(world)?;
+    let carried_entities = save_cargo_owned_by_holder(world, player_entity)?;
+
+    Ok(SavedCharacterData {
+        character_id,
+        world_id,
+        player: SavedPlayer {
+            actor,
+            movement_mode,
+        },
+        carried_entities,
+    })
+}
+
+/// Spawns a saved player character and its carried cargo into `world`.
+///
+/// The returned entity is the newly spawned player. Relationship-bearing cargo
+/// is rebuilt in a second pass so save files never need runtime `Entity` IDs.
+pub fn spawn_saved_character_data(
+    world: &mut World,
+    save: &SavedCharacterData,
+) -> Result<Entity, CharacterLoadError> {
+    let player_entity = spawn_saved_player(world, save.player.clone());
+    let player_id = save.player.actor.id;
+    let mut entity_by_id = HashMap::from([(player_id, player_entity)]);
+    spawn_saved_cargo(world, &save.carried_entities, &mut entity_by_id)
+        .map_err(CharacterLoadError::Cargo)?;
+    Ok(player_entity)
 }
 
 /// Builds the world-owned save payload from runtime resources and entities.
@@ -131,6 +190,78 @@ pub fn save_loose_cargo(world: &mut World) -> Result<Vec<SavedCargoItem>, CargoS
     Ok(cargo)
 }
 
+fn save_cargo_owned_by_holder(
+    world: &mut World,
+    holder: Entity,
+) -> Result<Vec<SavedCargoItem>, CharacterSaveError> {
+    let holder_id = world
+        .get::<PersistentId>(holder)
+        .copied()
+        .ok_or(CharacterSaveError::MissingPersistentId { entity: holder })?;
+    let carried_containers = player_carried_container_ids(world, holder);
+    let mut query = world.query_filtered::<(
+        Entity,
+        Option<&PersistentId>,
+        &CargoStats,
+        Option<&CargoParcel>,
+        Option<&ParcelDelivery>,
+        Option<&Container>,
+        Option<&CarriedBy>,
+        Option<&ContainedIn>,
+    ), With<Item>>();
+
+    let mut cargo = Vec::new();
+    for (
+        entity,
+        persistent_id,
+        stats,
+        parcel_marker,
+        parcel_delivery,
+        container,
+        carried_by,
+        contained_in,
+    ) in query.iter(world)
+    {
+        let location =
+            if let Some(carried_by) = carried_by.filter(|carried_by| carried_by.holder == holder) {
+                SavedCargoLocation::CarriedBy {
+                    holder: holder_id,
+                    slot: carried_by.slot.into(),
+                }
+            } else if let Some(contained_in) = contained_in
+                .filter(|contained_in| carried_containers.contains_key(&contained_in.container))
+            {
+                SavedCargoLocation::ContainedIn {
+                    container: carried_containers[&contained_in.container],
+                }
+            } else {
+                continue;
+            };
+
+        let id = persistent_id
+            .copied()
+            .ok_or(CharacterSaveError::MissingPersistentId { entity })?;
+        cargo.push(SavedCargoItem {
+            id,
+            definition_id: cargo_definition_id(parcel_marker.is_some(), container.is_some()),
+            stats: SavedCargoStats {
+                weight: stats.weight,
+                volume: stats.volume,
+            },
+            location,
+            parcel: saved_parcel_state(world, parcel_delivery)
+                .map_err(CharacterSaveError::Cargo)?,
+            container: container.map(|container| SavedContainerState {
+                volume_capacity: container.volume_capacity,
+                weight_capacity: container.weight_capacity,
+            }),
+        });
+    }
+
+    cargo.sort_by_key(|item| item.id.0);
+    Ok(cargo)
+}
+
 /// Spawns saved loose cargo into `world` and returns the IDs of new entities.
 ///
 /// `entity_by_id` is used only for parcel reservation targets in this first
@@ -176,6 +307,149 @@ pub fn spawn_saved_loose_cargo(
     }
 
     Ok(spawned)
+}
+
+fn spawn_saved_cargo(
+    world: &mut World,
+    cargo: &[SavedCargoItem],
+    entity_by_id: &mut HashMap<PersistentId, Entity>,
+) -> Result<(), CargoLoadError> {
+    for item in cargo {
+        let parcel = runtime_parcel_state(item.id, item.parcel, entity_by_id)?;
+        let mut entity = world.spawn((
+            Item,
+            item.id,
+            CargoStats {
+                weight: item.stats.weight,
+                volume: item.stats.volume,
+            },
+        ));
+
+        if item.parcel.is_some() {
+            entity.insert(CargoParcel);
+        }
+        if let Some(parcel) = parcel {
+            entity.insert(parcel);
+        }
+        if let Some(container) = item.container {
+            entity.insert(Container {
+                volume_capacity: container.volume_capacity,
+                weight_capacity: container.weight_capacity,
+            });
+        }
+
+        entity_by_id.insert(item.id, entity.id());
+    }
+
+    for item in cargo {
+        let entity = entity_by_id[&item.id];
+        match item.location {
+            SavedCargoLocation::Loose { x, y } => {
+                world.entity_mut(entity).insert(Position { x, y });
+            }
+            SavedCargoLocation::CarriedBy { holder, slot } => {
+                let holder = entity_by_id.get(&holder).copied().ok_or(
+                    CargoLoadError::ReservedByMissingEntity {
+                        id: item.id,
+                        holder,
+                    },
+                )?;
+                world.entity_mut(entity).insert(CarriedBy {
+                    holder,
+                    slot: slot.into(),
+                });
+            }
+            SavedCargoLocation::ContainedIn { container } => {
+                let container_entity = entity_by_id.get(&container).copied().ok_or(
+                    CargoLoadError::ReservedByMissingEntity {
+                        id: item.id,
+                        holder: container,
+                    },
+                )?;
+                world.entity_mut(entity).insert(ContainedIn {
+                    container: container_entity,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn saved_player_state(
+    world: &mut World,
+) -> Result<(Entity, SavedActorState, SavedMovementMode), CharacterSaveError> {
+    let mut query = world.query_filtered::<(
+        Entity,
+        Option<&PersistentId>,
+        &Position,
+        &Cargo,
+        &Stamina,
+        &MovementState,
+        &ActionEnergy,
+    ), With<Player>>();
+    let Some((entity, persistent_id, position, cargo, stamina, movement, energy)) =
+        query.iter(world).next()
+    else {
+        return Err(CharacterSaveError::NoPlayer);
+    };
+    let id = persistent_id
+        .copied()
+        .ok_or(CharacterSaveError::MissingPersistentId { entity })?;
+    Ok((
+        entity,
+        SavedActorState {
+            id,
+            x: position.x,
+            y: position.y,
+            cargo_max_weight: cargo.max_weight,
+            stamina_current: stamina.current,
+            stamina_max: stamina.max,
+            action_energy: (*energy).into(),
+        },
+        movement.mode.into(),
+    ))
+}
+
+fn spawn_saved_player(world: &mut World, saved: SavedPlayer) -> Entity {
+    world
+        .spawn((
+            Actor,
+            Player,
+            saved.actor.id,
+            Position {
+                x: saved.actor.x,
+                y: saved.actor.y,
+            },
+            Velocity::default(),
+            Momentum::default(),
+            Cargo {
+                max_weight: saved.actor.cargo_max_weight,
+            },
+            Stamina {
+                current: saved.actor.stamina_current,
+                max: saved.actor.stamina_max,
+            },
+            MovementState {
+                mode: saved.movement_mode.into(),
+            },
+            ActionEnergy::from(saved.actor.action_energy),
+        ))
+        .id()
+}
+
+fn player_carried_container_ids(
+    world: &mut World,
+    holder: Entity,
+) -> HashMap<Entity, PersistentId> {
+    let mut query =
+        world.query_filtered::<(Entity, Option<&PersistentId>, &CarriedBy), With<Container>>();
+    query
+        .iter(world)
+        .filter_map(|(entity, persistent_id, carried_by)| {
+            (carried_by.holder == holder).then_some((entity, persistent_id.copied()?))
+        })
+        .collect()
 }
 
 fn cargo_definition_id(is_parcel: bool, is_container: bool) -> ItemDefinitionId {
@@ -244,7 +518,51 @@ impl From<SavedCarrySlot> for CarrySlot {
     }
 }
 
+impl From<ActionEnergy> for SavedActionEnergy {
+    fn from(energy: ActionEnergy) -> Self {
+        Self {
+            ready_at: energy.ready_at,
+            last_cost: energy.last_cost,
+        }
+    }
+}
+
+impl From<SavedActionEnergy> for ActionEnergy {
+    fn from(energy: SavedActionEnergy) -> Self {
+        Self {
+            ready_at: energy.ready_at,
+            last_cost: energy.last_cost,
+        }
+    }
+}
+
+impl From<MovementMode> for SavedMovementMode {
+    fn from(mode: MovementMode) -> Self {
+        match mode {
+            MovementMode::Walking => Self::Walking,
+            MovementMode::Sprinting => Self::Sprinting,
+            MovementMode::Steady => Self::Steady,
+        }
+    }
+}
+
+impl From<SavedMovementMode> for MovementMode {
+    fn from(mode: SavedMovementMode) -> Self {
+        match mode {
+            SavedMovementMode::Walking => Self::Walking,
+            SavedMovementMode::Sprinting => Self::Sprinting,
+            SavedMovementMode::Steady => Self::Steady,
+        }
+    }
+}
+
 impl From<CargoSaveError> for WorldSaveError {
+    fn from(error: CargoSaveError) -> Self {
+        Self::Cargo(error)
+    }
+}
+
+impl From<CargoSaveError> for CharacterSaveError {
     fn from(error: CargoSaveError) -> Self {
         Self::Cargo(error)
     }
@@ -405,5 +723,156 @@ mod tests {
             SavedCargoLocation::Loose { x: 8, y: 8 }
         );
         assert_eq!(saved_cargo.parcel, Some(SavedParcelState::Available));
+    }
+
+    #[test]
+    fn character_save_restores_player_and_carried_cargo_relationships() {
+        let mut world = World::new();
+        let player_id = PersistentId(1);
+        let player = world
+            .spawn((
+                Actor,
+                Player,
+                player_id,
+                Position { x: 12, y: -4 },
+                Velocity::default(),
+                Cargo { max_weight: 55.0 },
+                Stamina {
+                    current: 18.0,
+                    max: 30.0,
+                },
+                MovementState {
+                    mode: MovementMode::Sprinting,
+                },
+                ActionEnergy {
+                    ready_at: 90,
+                    last_cost: 65,
+                },
+            ))
+            .id();
+        world.spawn((
+            Item,
+            PersistentId(2),
+            CargoStats {
+                weight: 4.0,
+                volume: 1.0,
+            },
+            CarriedBy {
+                holder: player,
+                slot: CarrySlot::Chest,
+            },
+        ));
+        let backpack = world
+            .spawn((
+                Item,
+                PersistentId(3),
+                CargoStats {
+                    weight: 2.0,
+                    volume: 3.0,
+                },
+                Container {
+                    volume_capacity: 12.0,
+                    weight_capacity: 25.0,
+                },
+                CarriedBy {
+                    holder: player,
+                    slot: CarrySlot::Back,
+                },
+            ))
+            .id();
+        world.spawn((
+            Item,
+            PersistentId(4),
+            CargoStats {
+                weight: 6.0,
+                volume: 1.0,
+            },
+            CargoParcel,
+            ParcelDelivery::ReservedBy(player),
+            ContainedIn {
+                container: backpack,
+            },
+        ));
+
+        let saved = save_character_data(&mut world, CharacterId(5), WorldId(9))
+            .expect("character should save");
+
+        assert_eq!(saved.character_id, CharacterId(5));
+        assert_eq!(saved.world_id, WorldId(9));
+        assert_eq!(saved.player.actor.id, player_id);
+        assert_eq!(saved.player.actor.x, 12);
+        assert_eq!(saved.player.actor.y, -4);
+        assert_eq!(saved.player.actor.cargo_max_weight, 55.0);
+        assert_eq!(saved.player.actor.stamina_current, 18.0);
+        assert_eq!(saved.player.actor.action_energy.ready_at, 90);
+        assert_eq!(saved.player.movement_mode, SavedMovementMode::Sprinting);
+        assert_eq!(saved.carried_entities.len(), 3);
+        assert!(saved.carried_entities.iter().any(|item| {
+            item.id == PersistentId(4)
+                && item.location
+                    == SavedCargoLocation::ContainedIn {
+                        container: PersistentId(3),
+                    }
+                && item.parcel == Some(SavedParcelState::ReservedBy(player_id))
+        }));
+
+        let mut restored = World::new();
+        let restored_player =
+            spawn_saved_character_data(&mut restored, &saved).expect("saved character should load");
+        assert_eq!(
+            restored.get::<Position>(restored_player),
+            Some(&Position { x: 12, y: -4 })
+        );
+        assert_eq!(
+            restored
+                .get::<Stamina>(restored_player)
+                .map(|stamina| stamina.current),
+            Some(18.0)
+        );
+        assert_eq!(
+            restored
+                .get::<Cargo>(restored_player)
+                .map(|cargo| cargo.max_weight),
+            Some(55.0)
+        );
+        assert_eq!(
+            restored
+                .get::<MovementState>(restored_player)
+                .map(|movement| movement.mode),
+            Some(MovementMode::Sprinting)
+        );
+        assert_eq!(
+            restored
+                .get::<ActionEnergy>(restored_player)
+                .map(|energy| energy.ready_at),
+            Some(90)
+        );
+
+        let restored_backpack = entity_with_id(&mut restored, PersistentId(3));
+        let restored_parcel = entity_with_id(&mut restored, PersistentId(4));
+        assert_eq!(
+            restored
+                .get::<CarriedBy>(restored_backpack)
+                .map(|carried_by| carried_by.holder),
+            Some(restored_player)
+        );
+        assert_eq!(
+            restored
+                .get::<ContainedIn>(restored_parcel)
+                .map(|contained_in| contained_in.container),
+            Some(restored_backpack)
+        );
+        assert_eq!(
+            restored.get::<ParcelDelivery>(restored_parcel),
+            Some(&ParcelDelivery::ReservedBy(restored_player))
+        );
+    }
+
+    fn entity_with_id(world: &mut World, id: PersistentId) -> Entity {
+        let mut query = world.query::<(Entity, &PersistentId)>();
+        query
+            .iter(world)
+            .find_map(|(entity, persistent_id)| (*persistent_id == id).then_some(entity))
+            .expect("entity with persistent ID should exist")
     }
 }

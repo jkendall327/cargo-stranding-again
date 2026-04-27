@@ -24,6 +24,7 @@ pub struct SavedActorState {
     pub id: PersistentId,
     pub x: i32,
     pub y: i32,
+    pub cargo_max_weight: f32,
     pub stamina_current: f32,
     pub stamina_max: f32,
     pub action_energy: SavedActionEnergy,

@@ -24,10 +24,14 @@ pub use map::{
 };
 pub use player::{SavedActorState, SavedCharacterData, SavedMovementMode, SavedPlayer};
 pub use runtime::{
-    save_loose_cargo, save_world_data, spawn_saved_loose_cargo, CargoLoadError, CargoSaveError,
-    WorldSaveError,
+    save_character_data, save_loose_cargo, save_world_data, spawn_saved_character_data,
+    spawn_saved_loose_cargo, CargoLoadError, CargoSaveError, CharacterLoadError,
+    CharacterSaveError, WorldSaveError,
 };
-pub use storage::{read_world_directory, write_world_directory, SaveDirectoryError};
+pub use storage::{
+    read_character_file, read_world_directory, write_character_file, write_world_directory,
+    SaveDirectoryError,
+};
 pub use timeline::{SavedActionEnergy, SavedTimeline};
 pub use world::{SavedEntity, SavedWorldData};
 

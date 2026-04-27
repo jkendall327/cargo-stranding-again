@@ -322,6 +322,7 @@ to remain shaped like old save files forever.
 5a. [x] Add in-memory world save payload assembly for loaded chunks and loose cargo.
 6. [ ] Add world directory layout and single-world/single-character save commands.
    - [x] Add RON world manifest plus per-chunk filesystem round-trip.
+   - [x] Add character file storage round-trip.
    - [ ] Add single-world/single-character save commands.
 7. [ ] Add save eligibility helper.
 8. [ ] Add migration scaffolding before the second save version exists.
@@ -336,8 +337,10 @@ Current status:
 - `Save<T>`, `SaveMetadata`, `SaveVersion`, and `SaveKind` exist.
 - `PersistentId`, `WorldId`, `CharacterId`, and `ItemDefinitionId` exist, with
   `PersistentId` available as an ECS component.
-- Map/chunk persistence currently round-trips through the in-memory save model,
-  not through filesystem storage yet.
+- Map/chunk persistence round-trips through in-memory save structs and RON
+  filesystem storage.
+- Character persistence saves and loads player actor state plus player-carried
+  cargo/container relationships through explicit save structs.
 - Runtime `Chunk` exposes row-major tile snapshots and can be rebuilt from
   complete tile snapshots with an explicit tile-count error.
 - Generated and authored chunk data have tests proving exact schema round-trip,

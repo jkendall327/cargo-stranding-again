@@ -284,7 +284,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
   - [x] map/chunk seed and tile schema
   - [x] in-memory world save payload for loaded chunks and loose cargo
   - [x] map/chunk seed and loaded chunk tiles on disk
-  - [ ] player position/stamina/load
+  - [x] player position/stamina/load
   - [ ] loose/carried/delivered cargo state
   - [ ] NPC positions/jobs
 - [ ] Add load path in startup/debug menu.

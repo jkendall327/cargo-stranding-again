@@ -5,10 +5,14 @@ use std::{
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use super::{Save, SaveKind, SavedChunk, SavedChunkCoord, SavedEntity, SavedWorldData, WorldId};
+use super::{
+    CharacterId, Save, SaveKind, SavedCharacterData, SavedChunk, SavedChunkCoord, SavedEntity,
+    SavedWorldData, WorldId,
+};
 
 const WORLD_MANIFEST_FILE: &str = "world.ron";
 const CHUNK_DIRECTORY: &str = "chunks";
+const CHARACTER_DIRECTORY: &str = "characters";
 
 /// Filesystem persistence errors.
 #[derive(Debug)]
@@ -107,6 +111,32 @@ pub fn read_world_directory(
     })
 }
 
+/// Writes one character save under a world save directory.
+pub fn write_character_file(
+    world_path: impl AsRef<Path>,
+    save: &Save<SavedCharacterData>,
+) -> Result<(), SaveDirectoryError> {
+    ensure_kind(save.metadata.kind, SaveKind::Character)?;
+
+    let character_dir = world_path.as_ref().join(CHARACTER_DIRECTORY);
+    create_dir_all(&character_dir)?;
+    write_ron(
+        &character_path(&character_dir, save.payload.character_id),
+        save,
+    )
+}
+
+/// Reads one character save from a world save directory.
+pub fn read_character_file(
+    world_path: impl AsRef<Path>,
+    character_id: CharacterId,
+) -> Result<Save<SavedCharacterData>, SaveDirectoryError> {
+    let character_dir = world_path.as_ref().join(CHARACTER_DIRECTORY);
+    let save: Save<SavedCharacterData> = read_ron(&character_path(&character_dir, character_id))?;
+    ensure_kind(save.metadata.kind, SaveKind::Character)?;
+    Ok(save)
+}
+
 fn ensure_kind(actual: SaveKind, expected: SaveKind) -> Result<(), SaveDirectoryError> {
     if actual == expected {
         Ok(())
@@ -151,14 +181,18 @@ fn chunk_path(chunk_dir: &Path, coord: SavedChunkCoord) -> PathBuf {
     chunk_dir.join(format!("{}_{}.ron", coord.x, coord.y))
 }
 
+fn character_path(character_dir: &Path, id: CharacterId) -> PathBuf {
+    character_dir.join(format!("{}.ron", id.0))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
     use crate::persistence::{
-        ItemDefinitionId, PersistentId, SavedCargoItem, SavedCargoLocation, SavedCargoStats,
-        SavedParcelState,
+        ItemDefinitionId, PersistentId, SavedActionEnergy, SavedActorState, SavedCargoItem,
+        SavedCargoLocation, SavedCargoStats, SavedMovementMode, SavedParcelState, SavedPlayer,
     };
 
     #[test]
@@ -194,6 +228,43 @@ mod tests {
         assert_eq!(restored, save);
         assert!(root.join(WORLD_MANIFEST_FILE).is_file());
         assert!(root.join(CHUNK_DIRECTORY).join("-1_2.ron").is_file());
+
+        fs::remove_dir_all(root).expect("test save directory should clean up");
+    }
+
+    #[test]
+    fn character_file_round_trips_under_world_directory() {
+        let root = temp_save_dir("character_file_round_trips_under_world_directory");
+        let save = Save::new(
+            SaveKind::Character,
+            SavedCharacterData {
+                character_id: CharacterId(7),
+                world_id: WorldId(5),
+                player: SavedPlayer {
+                    actor: SavedActorState {
+                        id: PersistentId(1),
+                        x: 9,
+                        y: -2,
+                        cargo_max_weight: 40.0,
+                        stamina_current: 21.0,
+                        stamina_max: 35.0,
+                        action_energy: SavedActionEnergy {
+                            ready_at: 30,
+                            last_cost: 100,
+                        },
+                    },
+                    movement_mode: SavedMovementMode::Steady,
+                },
+                carried_entities: vec![],
+            },
+        );
+
+        write_character_file(&root, &save).expect("character file should write");
+        let restored =
+            read_character_file(&root, CharacterId(7)).expect("character file should read");
+
+        assert_eq!(restored, save);
+        assert!(root.join(CHARACTER_DIRECTORY).join("7.ron").is_file());
 
         fs::remove_dir_all(root).expect("test save directory should clean up");
     }
