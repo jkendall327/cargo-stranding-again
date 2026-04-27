@@ -9,6 +9,7 @@ pub mod map;
 pub mod messages;
 pub mod momentum;
 pub mod movement;
+pub mod persistence;
 pub mod render;
 pub mod resources;
 pub mod schedules;
