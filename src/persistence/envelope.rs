@@ -35,6 +35,7 @@ pub struct SaveMetadata {
 /// This is intentionally not tied to the crate version: changing gameplay code
 /// is different from changing the persisted data contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SaveVersion(pub u32);
 
 impl SaveVersion {
@@ -48,5 +49,6 @@ impl SaveVersion {
 #[serde(rename_all = "snake_case")]
 pub enum SaveKind {
     World,
+    Chunk,
     Character,
 }

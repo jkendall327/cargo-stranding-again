@@ -10,6 +10,7 @@ mod ids;
 mod map;
 mod player;
 mod runtime;
+mod storage;
 mod timeline;
 
 pub use cargo::{
@@ -26,6 +27,7 @@ pub use runtime::{
     save_loose_cargo, save_world_data, spawn_saved_loose_cargo, CargoLoadError, CargoSaveError,
     WorldSaveError,
 };
+pub use storage::{read_world_directory, write_world_directory, SaveDirectoryError};
 pub use timeline::{SavedActionEnergy, SavedTimeline};
 pub use world::{SavedEntity, SavedWorldData};
 

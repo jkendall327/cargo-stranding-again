@@ -283,7 +283,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
   - [ ] simulation clock
   - [x] map/chunk seed and tile schema
   - [x] in-memory world save payload for loaded chunks and loose cargo
-  - [ ] map/chunk seed and modified tiles on disk
+  - [x] map/chunk seed and loaded chunk tiles on disk
   - [ ] player position/stamina/load
   - [ ] loose/carried/delivered cargo state
   - [ ] NPC positions/jobs
@@ -291,7 +291,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
 - [ ] Add round-trip tests.
   - [x] generated/authored chunk state round-trips through save model
   - [x] loose cargo keeps identity, position, stats, and parcel state
-  - [ ] filesystem save/load round-trip
+  - [x] filesystem save/load round-trip
 
 ## Useful Guardrails
 
