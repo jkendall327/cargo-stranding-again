@@ -282,6 +282,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
 - [ ] Save core resources.
   - [ ] simulation clock
   - [x] map/chunk seed and tile schema
+  - [x] in-memory world save payload for loaded chunks and loose cargo
   - [ ] map/chunk seed and modified tiles on disk
   - [ ] player position/stamina/load
   - [ ] loose/carried/delivered cargo state

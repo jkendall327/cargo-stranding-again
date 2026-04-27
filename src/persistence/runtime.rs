@@ -6,10 +6,11 @@ use crate::cargo::{
     CargoParcel, CargoStats, CarriedBy, CarrySlot, ContainedIn, Container, Item, ParcelDelivery,
 };
 use crate::components::Position;
+use crate::map::Map;
 
 use super::{
     ItemDefinitionId, PersistentId, SavedCargoItem, SavedCargoLocation, SavedCargoStats,
-    SavedCarrySlot, SavedContainerState, SavedParcelState,
+    SavedCarrySlot, SavedContainerState, SavedEntity, SavedParcelState, SavedWorldData, WorldId,
 };
 
 const GENERIC_ITEM_DEFINITION_ID: &str = "item.generic";
@@ -33,6 +34,40 @@ pub enum CargoLoadError {
         id: PersistentId,
         holder: PersistentId,
     },
+}
+
+/// Error produced while building a world-owned save payload from ECS state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldSaveError {
+    MissingMap,
+    Cargo(CargoSaveError),
+}
+
+/// Builds the world-owned save payload from runtime resources and entities.
+///
+/// This intentionally saves every loaded chunk as authoritative history. The
+/// seed remains useful for chunks that have not entered play yet, while loaded
+/// chunks preserve the exact world the player has seen.
+pub fn save_world_data(
+    world: &mut World,
+    world_id: WorldId,
+) -> Result<SavedWorldData, WorldSaveError> {
+    let map = world
+        .get_resource::<Map>()
+        .ok_or(WorldSaveError::MissingMap)?;
+    let seed = map.seed;
+    let chunks = map.loaded_chunks().map(Into::into).collect::<Vec<_>>();
+    let world_entities = save_loose_cargo(world)?
+        .into_iter()
+        .map(SavedEntity::CargoItem)
+        .collect();
+
+    Ok(SavedWorldData {
+        world_id,
+        seed,
+        chunks,
+        world_entities,
+    })
 }
 
 /// Converts currently loose cargo entities into world-owned save payloads.
@@ -209,6 +244,12 @@ impl From<SavedCarrySlot> for CarrySlot {
     }
 }
 
+impl From<CargoSaveError> for WorldSaveError {
+    fn from(error: CargoSaveError) -> Self {
+        Self::Cargo(error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,5 +367,43 @@ mod tests {
             save_loose_cargo(&mut world),
             Err(CargoSaveError::MissingPersistentId { entity })
         );
+    }
+
+    #[test]
+    fn world_save_data_includes_loaded_chunks_and_loose_cargo() {
+        let mut world = World::new();
+        world.insert_resource(Map::generate());
+        let world_id = WorldId(99);
+        let cargo_id = PersistentId(12);
+        world.spawn((
+            Item,
+            cargo_id,
+            Position { x: 8, y: 8 },
+            CargoStats {
+                weight: 3.0,
+                volume: 1.0,
+            },
+            CargoParcel,
+            ParcelDelivery::Available,
+        ));
+
+        let saved = save_world_data(&mut world, world_id).expect("world data should save");
+
+        assert_eq!(saved.world_id, world_id);
+        assert_eq!(saved.seed, Map::generate().seed);
+        assert!(!saved.chunks.is_empty());
+        assert!(saved.chunks.windows(2).all(|pair| {
+            let a = pair[0].coord;
+            let b = pair[1].coord;
+            (a.x, a.y) <= (b.x, b.y)
+        }));
+        assert_eq!(saved.world_entities.len(), 1);
+        let SavedEntity::CargoItem(saved_cargo) = &saved.world_entities[0];
+        assert_eq!(saved_cargo.id, cargo_id);
+        assert_eq!(
+            saved_cargo.location,
+            SavedCargoLocation::Loose { x: 8, y: 8 }
+        );
+        assert_eq!(saved_cargo.parcel, Some(SavedParcelState::Available));
     }
 }

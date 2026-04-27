@@ -319,6 +319,7 @@ to remain shaped like old save files forever.
 3. [x] Add map/chunk save structs and chunk round-trip tests.
 4. [x] Add loose cargo save/load round-trip tests.
 5. [x] Add player/character save structs.
+5a. [x] Add in-memory world save payload assembly for loaded chunks and loose cargo.
 6. [ ] Add world directory layout and single-world/single-character save commands.
 7. [ ] Add save eligibility helper.
 8. [ ] Add migration scaffolding before the second save version exists.

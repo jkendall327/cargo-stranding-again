@@ -468,6 +468,13 @@ impl Map {
         self.loaded_chunks.get(&coord)
     }
 
+    /// Iterates all loaded chunks in deterministic coordinate order.
+    pub fn loaded_chunks(&self) -> impl Iterator<Item = &Chunk> {
+        let mut chunks = self.loaded_chunks.values().collect::<Vec<_>>();
+        chunks.sort_by_key(|chunk| (chunk.coord().x, chunk.coord().y));
+        chunks.into_iter()
+    }
+
     /// Returns a mutable loaded chunk, or `None` when that chunk is absent.
     pub fn loaded_chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
         self.loaded_chunks.get_mut(&coord)
