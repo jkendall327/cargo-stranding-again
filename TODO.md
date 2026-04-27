@@ -289,7 +289,7 @@ Goal: add persistence before worldgen and cargo relationships become too large t
 - [ ] Add load path in startup/debug menu.
 - [ ] Add round-trip tests.
   - [x] generated/authored chunk state round-trips through save model
-  - [ ] loose cargo keeps identity, position, stats, and parcel state
+  - [x] loose cargo keeps identity, position, stats, and parcel state
   - [ ] filesystem save/load round-trip
 
 ## Useful Guardrails

@@ -9,6 +9,7 @@ mod envelope;
 mod ids;
 mod map;
 mod player;
+mod runtime;
 mod timeline;
 
 pub use cargo::{
@@ -21,6 +22,7 @@ pub use map::{
     SavedChunk, SavedChunkCoord, SavedChunkError, SavedMapBounds, SavedTerrain, SavedTile,
 };
 pub use player::{SavedActorState, SavedCharacterData, SavedMovementMode, SavedPlayer};
+pub use runtime::{save_loose_cargo, spawn_saved_loose_cargo, CargoLoadError, CargoSaveError};
 pub use timeline::{SavedActionEnergy, SavedTimeline};
 pub use world::{SavedEntity, SavedWorldData};
 
