@@ -17,7 +17,9 @@ pub use cargo::{
 };
 pub use envelope::{Save, SaveKind, SaveMetadata, SaveVersion, CURRENT_SAVE_VERSION};
 pub use ids::{CharacterId, ItemDefinitionId, PersistentId, WorldId};
-pub use map::{SavedChunk, SavedChunkCoord, SavedMapBounds, SavedTerrain, SavedTile};
+pub use map::{
+    SavedChunk, SavedChunkCoord, SavedChunkError, SavedMapBounds, SavedTerrain, SavedTile,
+};
 pub use player::{SavedActorState, SavedCharacterData, SavedMovementMode, SavedPlayer};
 pub use timeline::{SavedActionEnergy, SavedTimeline};
 pub use world::{SavedEntity, SavedWorldData};

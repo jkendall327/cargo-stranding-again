@@ -194,6 +194,8 @@ Goal: move from one fixed rectangle to deterministic, streamable world data.
 - [x] Add chunk load boundaries around the camera or player.
   - Unloading is deliberately deferred while generated chunks stay in memory.
 - [ ] Add persistence for visited/modified chunks.
+  - [x] Add explicit saved chunk/tile schema types.
+  - [x] Add runtime chunk <-> saved chunk round-trip tests.
   - [ ] Start with a simple save directory or single save file.
   - [ ] Persist only changed chunks if generation is deterministic.
 - [x] Update rendering to draw visible tiles across chunk boundaries.
@@ -201,7 +203,8 @@ Goal: move from one fixed rectangle to deterministic, streamable world data.
 - [ ] Add tests.
   - [x] Same seed + chunk coordinate produces same terrain.
   - [x] World coordinate lookup crosses chunk boundaries correctly.
-  - [ ] Modified chunk state round-trips through save/load.
+  - [x] Modified chunk state round-trips through save/load model.
+  - [ ] Modified chunk state round-trips through filesystem save/load.
 
 Current code pointers:
 
@@ -267,17 +270,27 @@ Current code pointers:
 Goal: add persistence before worldgen and cargo relationships become too large to reason about casually.
 
 - [ ] Decide save scope.
+  - [x] Split world and character save roots.
   - [ ] Full world snapshot for early development.
   - [ ] Later: deterministic world seed plus changed chunks plus ECS entity state.
-- [ ] Add serializable save structs instead of serializing ECS internals directly.
+- [x] Add serializable save structs instead of serializing ECS internals directly.
+  - [x] Add versioned save envelope metadata.
+  - [x] Add stable persistent ID types/components.
+  - [x] Add map/chunk schema and conversions.
+  - [x] Add player/character schema types.
+  - [x] Add cargo/container/parcel schema types using persistent IDs.
 - [ ] Save core resources.
   - [ ] simulation clock
-  - [ ] map/chunk seed and modified tiles
+  - [x] map/chunk seed and tile schema
+  - [ ] map/chunk seed and modified tiles on disk
   - [ ] player position/stamina/load
   - [ ] loose/carried/delivered cargo state
   - [ ] NPC positions/jobs
 - [ ] Add load path in startup/debug menu.
 - [ ] Add round-trip tests.
+  - [x] generated/authored chunk state round-trips through save model
+  - [ ] loose cargo keeps identity, position, stats, and parcel state
+  - [ ] filesystem save/load round-trip
 
 ## Useful Guardrails
 

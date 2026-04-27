@@ -314,18 +314,31 @@ to remain shaped like old save files forever.
 
 ## First Implementation Milestones
 
-1. Add save schema modules with versioned envelope types.
-2. Add persistent ID types/components for persistent entities.
-3. Add map/chunk save structs and chunk round-trip tests.
-4. Add loose cargo save/load round-trip tests.
-5. Add player/character save structs.
-6. Add world directory layout and single-world/single-character save commands.
-7. Add save eligibility helper.
-8. Add migration scaffolding before the second save version exists.
+1. [x] Add save schema modules with versioned envelope types.
+2. [x] Add persistent ID types/components for persistent entities.
+3. [x] Add map/chunk save structs and chunk round-trip tests.
+4. [ ] Add loose cargo save/load round-trip tests.
+5. [x] Add player/character save structs.
+6. [ ] Add world directory layout and single-world/single-character save commands.
+7. [ ] Add save eligibility helper.
+8. [ ] Add migration scaffolding before the second save version exists.
 
 The first useful test should prove that modified/generated chunk state
 round-trips exactly. The second should prove that loose cargo keeps identity,
 position, stats, and parcel state across save/load.
+
+Current status:
+
+- Save schema modules live under `src/persistence/`.
+- `Save<T>`, `SaveMetadata`, `SaveVersion`, and `SaveKind` exist.
+- `PersistentId`, `WorldId`, `CharacterId`, and `ItemDefinitionId` exist, with
+  `PersistentId` available as an ECS component.
+- Map/chunk persistence currently round-trips through the in-memory save model,
+  not through filesystem storage yet.
+- Runtime `Chunk` exposes row-major tile snapshots and can be rebuilt from
+  complete tile snapshots with an explicit tile-count error.
+- Generated and authored chunk data have tests proving exact schema round-trip,
+  including terrain, elevation, and water depth.
 
 ## Deferred
 

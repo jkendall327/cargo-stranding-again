@@ -113,6 +113,13 @@ pub struct Chunk {
     water_depths: Vec<u8>,
 }
 
+/// Error returned when rebuilding a chunk from persisted tile data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChunkTileCountError {
+    pub expected: usize,
+    pub actual: usize,
+}
+
 /// Chunk-backed map resource.
 ///
 /// Callers address this as one continuous world using `TileCoord`. Internally,
@@ -192,6 +199,43 @@ impl Chunk {
         self.coord
     }
 
+    /// Iterates this chunk's complete tile data in row-major local-tile order.
+    ///
+    /// Persistence uses this to save authoritative chunk history without
+    /// exposing the parallel storage vectors as mutable public state.
+    pub fn tiles(&self) -> ChunkTiles<'_> {
+        ChunkTiles {
+            chunk: self,
+            index: 0,
+        }
+    }
+
+    /// Rebuilds a runtime chunk from complete row-major tile snapshots.
+    pub(crate) fn from_tile_infos<I>(
+        coord: ChunkCoord,
+        tiles: I,
+    ) -> Result<Self, ChunkTileCountError>
+    where
+        I: IntoIterator<Item = TileInfo>,
+    {
+        let tiles = tiles.into_iter().collect::<Vec<_>>();
+        let expected = chunk_tile_count();
+        if tiles.len() != expected {
+            return Err(ChunkTileCountError {
+                expected,
+                actual: tiles.len(),
+            });
+        }
+
+        let mut chunk = Self::new(coord);
+        for (index, tile) in tiles.into_iter().enumerate() {
+            chunk.tiles[index] = tile.terrain;
+            chunk.elevations[index] = tile.elevation;
+            chunk.water_depths[index] = tile.water_depth;
+        }
+        Ok(chunk)
+    }
+
     fn tile_at(&self, local: LocalTileCoord) -> Option<TileInfo> {
         self.index(local).map(|index| TileInfo {
             terrain: self.tiles[index],
@@ -224,6 +268,30 @@ impl Chunk {
     fn index(&self, local: LocalTileCoord) -> Option<usize> {
         (local.x >= 0 && local.y >= 0 && local.x < CHUNK_WIDTH && local.y < CHUNK_HEIGHT)
             .then_some((local.y * CHUNK_WIDTH + local.x) as usize)
+    }
+}
+
+/// Iterator over one chunk's local tile snapshots.
+pub struct ChunkTiles<'a> {
+    chunk: &'a Chunk,
+    index: usize,
+}
+
+impl Iterator for ChunkTiles<'_> {
+    type Item = (LocalTileCoord, TileInfo);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= chunk_tile_count() {
+            return None;
+        }
+
+        let index = self.index;
+        self.index += 1;
+        let local = LocalTileCoord::new(
+            (index as i32).rem_euclid(CHUNK_WIDTH),
+            (index as i32).div_euclid(CHUNK_WIDTH),
+        );
+        Some((local, self.chunk.tile_at(local)?))
     }
 }
 
@@ -692,6 +760,10 @@ impl Map {
 
 fn chunk_span(size: i32, chunk_size: i32) -> i32 {
     size.div_euclid(chunk_size) + i32::from(size.rem_euclid(chunk_size) != 0)
+}
+
+const fn chunk_tile_count() -> usize {
+    (CHUNK_WIDTH * CHUNK_HEIGHT) as usize
 }
 
 fn deterministic_noise(x: i32, y: i32) -> i32 {
