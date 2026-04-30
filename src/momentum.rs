@@ -45,7 +45,7 @@ pub fn movement_effect(
         1.0
     };
 
-    let stamina_delta = if changing_direction {
+    let stamina_delta = if changing_direction && mode == MovementMode::Sprinting {
         -(previous.amount * TURN_STAMINA_PENALTY_PER_MOMENTUM)
     } else {
         0.0
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn turning_with_momentum_adds_penalty_and_risk() {
+    fn turning_with_walking_momentum_adds_energy_penalty_and_risk() {
         let effect = movement_effect(
             MomentumState {
                 direction: Some(Direction::East),
@@ -171,6 +171,21 @@ mod tests {
         );
 
         assert!(effect.energy_multiplier > 1.0);
+        assert_eq!(effect.stamina_delta, 0.0);
+        assert_eq!(effect.cargo_loss_risk, 100);
+    }
+
+    #[test]
+    fn turning_with_sprinting_momentum_adds_stamina_penalty() {
+        let effect = movement_effect(
+            MomentumState {
+                direction: Some(Direction::East),
+                amount: 5.0,
+            },
+            Direction::South,
+            MovementMode::Sprinting,
+        );
+
         assert!(effect.stamina_delta < 0.0);
         assert_eq!(effect.cargo_loss_risk, 100);
     }
