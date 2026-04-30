@@ -48,30 +48,9 @@ Status: done.
 
 Goal: stop hardcoding every terrain/item stat in Rust once the domain model settles enough.
 
-- [x] Add `serde` and a data format.
-  - [x] Prefer RON or TOML for hand-authored game data.
-  - [ ] JSON is fine if tool simplicity matters more.
-- [ ] Introduce stable terrain IDs in the map.
-  - [ ] Keep the existing `Terrain` enum until there is a clear benefit to replacing it.
-  - [ ] Consider `TerrainId` plus `TerrainDefinition`.
-- [x] Move terrain definitions out of `Terrain` methods.
-  - [x] movement cost
-  - [x] stamina delta
-  - [x] passability
-  - [x] color/glyph, unless rendering gets its own definition layer
-  - [ ] later: elevation behavior, wetness, exposure, wind shelter, traction
-- [ ] Add a `TerrainDefinitions` resource.
-- [x] Load default terrain definitions at startup.
-- [ ] Decide fallback behavior if data files are missing or invalid.
-  - [ ] For development, panic with useful errors is acceptable.
-  - [ ] For release, fall back to embedded defaults or show an error screen.
-- [x] Add item/cargo definitions after the cargo model exists.
-  - [x] item ID
-  - [x] display name
-  - [x] weight
-  - [x] volume
-  - [x] cargo tags/properties
-- [x] Add tests for loading and validating definitions.
+Items are now data-driven and proven to work in world-spawning terms.
+Making terrain data-driven has been descoped for now because it's not worth it.
+Maybe later.
 
 ## 6. NPC Goals And Jobs
 
