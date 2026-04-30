@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::player_carried_parcel_count;
+use crate::cargo::player_carried_item_count;
 use crate::resources::{
     GameScreen, InventoryAction, InventoryIntent, InventoryMenuState, MenuAction, MenuInputState,
     PauseMenuEntry, PauseMenuState, PersistenceAction, PersistenceIntent,
@@ -47,13 +47,13 @@ pub fn menu_navigation(world: &mut World) {
             }
         }
         (GameScreen::InventoryMenu, MenuAction::MoveSelectionUp) => {
-            let item_count = player_carried_parcel_count(world);
+            let item_count = player_carried_item_count(world);
             world
                 .resource_mut::<InventoryMenuState>()
                 .select_previous(item_count);
         }
         (GameScreen::InventoryMenu, MenuAction::MoveSelectionDown) => {
-            let item_count = player_carried_parcel_count(world);
+            let item_count = player_carried_item_count(world);
             world
                 .resource_mut::<InventoryMenuState>()
                 .select_next(item_count);
@@ -107,6 +107,22 @@ mod tests {
                 },
                 CargoParcel,
                 ParcelDelivery::Available,
+            ))
+            .id()
+    }
+
+    fn spawn_carried_item(world: &mut World, holder: Entity) -> Entity {
+        world
+            .spawn((
+                Item,
+                CargoStats {
+                    weight: 4.0,
+                    volume: 1.0,
+                },
+                CarriedBy {
+                    holder,
+                    slot: CarrySlot::Chest,
+                },
             ))
             .id()
     }
@@ -259,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn inventory_selection_wraps_through_carried_parcels() {
+    fn inventory_selection_wraps_through_carried_items() {
         let mut world = World::new();
         setup_menu_world(
             &mut world,
@@ -268,7 +284,7 @@ mod tests {
         );
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 });
         spawn_carried_parcel(&mut world, player);
-        spawn_carried_parcel(&mut world, player);
+        spawn_carried_item(&mut world, player);
 
         let mut schedule = menu_with_inventory_resolution_schedule();
         schedule.run(&mut world);
@@ -279,14 +295,14 @@ mod tests {
     }
 
     #[test]
-    fn confirming_inventory_drops_selected_parcel() {
+    fn confirming_inventory_drops_selected_item() {
         let mut world = World::new();
         setup_menu_world(&mut world, GameScreen::InventoryMenu, MenuAction::Confirm);
         world.insert_resource(EnergyTimeline::default());
         world.insert_resource(SimulationClock { turn: 0 });
         world.insert_resource(PlayerIntent::default());
         let player = spawn_test_player(&mut world, Position { x: 2, y: 2 });
-        let parcel = spawn_carried_parcel(&mut world, player);
+        let item = spawn_carried_item(&mut world, player);
 
         let mut schedule = menu_with_inventory_resolution_schedule();
         let mut simulation = SimulationRunner::new();
@@ -294,16 +310,12 @@ mod tests {
 
         assert_eq!(
             *world
-                .get::<ParcelDelivery>(parcel)
-                .expect("test parcel should still exist"),
-            ParcelDelivery::Available
-        );
-        assert_eq!(
-            *world
-                .get::<Position>(parcel)
-                .expect("test parcel should still have a position"),
+                .get::<Position>(item)
+                .expect("test item should have a position after being dropped"),
             Position { x: 2, y: 2 }
         );
+        assert!(world.get::<CarriedBy>(item).is_none());
+        assert!(world.get::<ParcelDelivery>(item).is_none());
 
         let (player, ready_at) = {
             let mut player_query = world.query_filtered::<(Entity, &ActionEnergy), With<Player>>();

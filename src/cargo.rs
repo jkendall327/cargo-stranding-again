@@ -87,6 +87,7 @@ pub struct CarriedItemEntry {
     pub weight: f32,
     pub volume: f32,
     pub location: CarriedItemLocation,
+    pub is_parcel: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,6 +176,28 @@ pub fn player_carried_parcel_count(world: &mut World) -> usize {
     carried_parcel_count(world, player_entity)
 }
 
+pub fn carried_item_count(world: &mut World, holder: Entity) -> usize {
+    carried_items(world, holder).len()
+}
+
+pub fn player_carried_items(world: &mut World) -> Vec<CarriedItemEntry> {
+    let Some(player_entity) = player_entity(world) else {
+        return Vec::new();
+    };
+    carried_items(world, player_entity)
+}
+
+pub fn player_carried_item_count(world: &mut World) -> usize {
+    let Some(player_entity) = player_entity(world) else {
+        return 0;
+    };
+    carried_item_count(world, player_entity)
+}
+
+/// Lists all cargo currently held by an actor, including generic items.
+///
+/// Inventory and dropping should use this rather than parcel-only queries so
+/// delivery state does not accidentally define what the player can hold.
 pub fn carried_items(world: &mut World, holder: Entity) -> Vec<CarriedItemEntry> {
     let carried_containers = carried_containers(world, holder);
     let mut item_query = world.query::<(
@@ -182,16 +205,18 @@ pub fn carried_items(world: &mut World, holder: Entity) -> Vec<CarriedItemEntry>
         &CargoStats,
         Option<&CarriedBy>,
         Option<&ContainedIn>,
+        Option<&CargoParcel>,
     )>();
     let mut items = item_query
         .iter(world)
-        .filter_map(|(entity, stats, carried_by, contained_in)| {
+        .filter_map(|(entity, stats, carried_by, contained_in, parcel)| {
             if let Some(carried_by) = carried_by.filter(|carried_by| carried_by.holder == holder) {
                 return Some(CarriedItemEntry {
                     entity,
                     weight: stats.weight,
                     volume: stats.volume,
                     location: CarriedItemLocation::Slot(carried_by.slot),
+                    is_parcel: parcel.is_some(),
                 });
             }
 
@@ -202,6 +227,7 @@ pub fn carried_items(world: &mut World, holder: Entity) -> Vec<CarriedItemEntry>
                 weight: stats.weight,
                 volume: stats.volume,
                 location: CarriedItemLocation::Container(contained_in.container),
+                is_parcel: parcel.is_some(),
             })
         })
         .collect::<Vec<_>>();
@@ -431,6 +457,53 @@ mod tests {
             ParcelDelivery::Available
         );
         assert_eq!(derived_load(&mut world, holder), 5.0);
+    }
+
+    #[test]
+    fn carried_items_lists_generic_and_parcel_cargo() {
+        let mut world = World::new();
+        let holder = spawn_holder(&mut world, 40.0);
+        let generic_item = world
+            .spawn((
+                Item,
+                CargoStats {
+                    weight: 3.0,
+                    volume: 2.0,
+                },
+                CarriedBy {
+                    holder,
+                    slot: CarrySlot::Chest,
+                },
+            ))
+            .id();
+        let parcel = spawn_loose_parcel(&mut world, 5.0);
+        world
+            .entity_mut(parcel)
+            .insert(CarriedBy {
+                holder,
+                slot: CarrySlot::Back,
+            })
+            .remove::<Position>();
+
+        let mut expected = vec![
+            CarriedItemEntry {
+                entity: generic_item,
+                weight: 3.0,
+                volume: 2.0,
+                location: CarriedItemLocation::Slot(CarrySlot::Chest),
+                is_parcel: false,
+            },
+            CarriedItemEntry {
+                entity: parcel,
+                weight: 5.0,
+                volume: 1.0,
+                location: CarriedItemLocation::Slot(CarrySlot::Back),
+                is_parcel: true,
+            },
+        ];
+        expected.sort_by_key(|entry| entry.entity.to_bits());
+
+        assert_eq!(carried_items(&mut world, holder), expected);
     }
 
     #[test]

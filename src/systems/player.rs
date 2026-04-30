@@ -4,8 +4,8 @@ mod cargo;
 mod movement;
 
 use crate::cargo::{
-    derived_load, Cargo, CargoParcel, CargoStats, CargoTarget, CarriedBy, ContainedIn, Container,
-    Item, ParcelDelivery,
+    derived_load, Cargo, CargoStats, CargoTarget, CarriedBy, ContainedIn, Container, Item,
+    ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -44,7 +44,7 @@ pub fn open_inventory_from_player_intent(
     mut screen: ResMut<GameScreen>,
     mut inventory_menu: ResMut<InventoryMenuState>,
     player: Single<(Entity, &ActionEnergy), With<Player>>,
-    carried_parcels: Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoParcel>>,
+    carried_items: Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoStats>>,
     containers: Query<&CarriedBy, With<Container>>,
 ) {
     let Some(PlayerAction::OpenInventory) = intent.action else {
@@ -56,10 +56,10 @@ pub fn open_inventory_from_player_intent(
         return;
     }
 
-    let carried_count = carried_parcels
+    let carried_count = carried_items
         .iter()
         .filter(|(carried_by, contained_in)| {
-            parcel_carried_by_actor(*carried_by, *contained_in, &containers, player_entity)
+            item_carried_by_actor(*carried_by, *contained_in, &containers, player_entity)
         })
         .count();
     inventory_menu.clamp_to_item_count(carried_count);
@@ -67,7 +67,7 @@ pub fn open_inventory_from_player_intent(
     tracing::debug!(carried_count, "opened inventory");
 }
 
-fn parcel_carried_by_actor(
+fn item_carried_by_actor(
     carried_by: Option<&CarriedBy>,
     contained_in: Option<&ContainedIn>,
     containers: &Query<&CarriedBy, With<Container>>,

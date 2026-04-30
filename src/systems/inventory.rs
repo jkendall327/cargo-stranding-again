@@ -1,11 +1,11 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{CargoParcel, CarriedBy, ContainedIn, Container};
+use crate::cargo::{CargoStats, CarriedBy, ContainedIn, Container};
 use crate::components::{ActionEnergy, Player, Position};
 use crate::resources::{EnergyTimeline, InventoryAction, InventoryIntent, InventoryMenuState};
 use crate::systems::DropRequest;
 
-type CarriedParcelQuery<'w, 's> = Query<
+type CarriedItemQuery<'w, 's> = Query<
     'w,
     's,
     (
@@ -13,7 +13,7 @@ type CarriedParcelQuery<'w, 's> = Query<
         Option<&'static CarriedBy>,
         Option<&'static ContainedIn>,
     ),
-    With<CargoParcel>,
+    With<CargoStats>,
 >;
 
 pub fn inventory_actions(
@@ -21,7 +21,7 @@ pub fn inventory_actions(
     mut intent: ResMut<InventoryIntent>,
     mut inventory_menu: ResMut<InventoryMenuState>,
     player: Query<(Entity, &Position, &ActionEnergy), With<Player>>,
-    carried_parcels: CarriedParcelQuery,
+    carried_items: CarriedItemQuery,
     containers: Query<&CarriedBy, With<Container>>,
     mut drop_requests: MessageWriter<DropRequest>,
 ) {
@@ -35,11 +35,11 @@ pub fn inventory_actions(
             let Some(player) = player.iter().next() else {
                 return;
             };
-            drop_selected_inventory_parcel(
+            drop_selected_inventory_item(
                 &timeline,
                 &mut inventory_menu,
                 player,
-                &carried_parcels,
+                &carried_items,
                 &containers,
                 &mut drop_requests,
             );
@@ -47,11 +47,11 @@ pub fn inventory_actions(
     }
 }
 
-fn drop_selected_inventory_parcel(
+fn drop_selected_inventory_item(
     timeline: &EnergyTimeline,
     inventory_menu: &mut InventoryMenuState,
     player: (Entity, &Position, &ActionEnergy),
-    carried_parcels: &CarriedParcelQuery,
+    carried_items: &CarriedItemQuery,
     containers: &Query<&CarriedBy, With<Container>>,
     drop_requests: &mut MessageWriter<DropRequest>,
 ) -> bool {
@@ -60,38 +60,38 @@ fn drop_selected_inventory_parcel(
         return false;
     }
 
-    let mut parcels = carried_parcels
+    let mut items = carried_items
         .iter()
         .filter_map(|(entity, carried_by, contained_in)| {
-            parcel_carried_by_actor(carried_by, contained_in, containers, player_entity)
+            item_carried_by_actor(carried_by, contained_in, containers, player_entity)
                 .then_some(entity)
         })
         .collect::<Vec<_>>();
-    parcels.sort_by_key(|entity| entity.to_bits());
-    inventory_menu.clamp_to_item_count(parcels.len());
+    items.sort_by_key(|entity| entity.to_bits());
+    inventory_menu.clamp_to_item_count(items.len());
 
     let selected_index = inventory_menu.selected_index();
-    let Some(parcel) = parcels.get(selected_index).copied() else {
+    let Some(item) = items.get(selected_index).copied() else {
         return false;
     };
 
     drop_requests.write(DropRequest {
         actor: player_entity,
-        item: parcel,
+        item,
         at: *player_position,
     });
 
     tracing::info!(
         x = player_position.x,
         y = player_position.y,
-        item = ?parcel,
+        item = ?item,
         "player drop requested"
     );
 
     true
 }
 
-fn parcel_carried_by_actor(
+fn item_carried_by_actor(
     carried_by: Option<&CarriedBy>,
     contained_in: Option<&ContainedIn>,
     containers: &Query<&CarriedBy, With<Container>>,

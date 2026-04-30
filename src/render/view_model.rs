@@ -4,12 +4,13 @@ use crate::cargo::Cargo;
 use std::collections::HashMap;
 
 use crate::cargo::{
-    derived_load, player_carried_parcels, CargoParcel, CargoStats, CarriedBy, ContainedIn,
-    Container, Item, ParcelDelivery,
+    derived_load, player_carried_items, CargoParcel, CargoStats, CarriedBy, ContainedIn, Container,
+    Item, ParcelDelivery,
 };
 use crate::components::{
     AssignedJob, JobPhase, Momentum, MovementState, Player, Porter, Position, Stamina,
 };
+use crate::data::items::DisplayName;
 use crate::energy::ActionEnergy;
 use crate::map::{Map, TileCoord};
 use crate::movement::MovementMode;
@@ -273,15 +274,26 @@ struct CargoHolderSnapshot {
 impl InventoryEntry {
     pub fn all_from_world(world: &mut World) -> Vec<Self> {
         let selected_index = world.resource::<InventoryMenuState>().selected_index();
-        player_carried_parcels(world)
+        player_carried_items(world)
             .iter()
             .enumerate()
             .map(|(index, entry)| Self {
-                label: format!("Parcel {:.0} weight", entry.weight),
+                label: inventory_entry_label(
+                    world
+                        .get::<DisplayName>(entry.entity)
+                        .map(|name| name.0.as_str()),
+                    entry.weight,
+                    entry.is_parcel,
+                ),
                 selected: selected_index == index,
             })
             .collect()
     }
+}
+
+fn inventory_entry_label(name: Option<&str>, weight: f32, is_parcel: bool) -> String {
+    let name = name.unwrap_or(if is_parcel { "Parcel" } else { "Item" });
+    format!("{name} ({weight:.0} weight)")
 }
 
 impl PorterDebugRow {
@@ -368,6 +380,7 @@ mod tests {
     use super::*;
     use crate::cargo::{CarrySlot, Container};
     use crate::components::{Player, Porter};
+    use crate::data::items::DisplayName;
 
     fn spawn_player(world: &mut World) -> Entity {
         world.spawn((Player, Position { x: 1, y: 2 })).id()
@@ -507,5 +520,36 @@ mod tests {
                 has_contained_items: true,
             }]
         );
+    }
+
+    #[test]
+    fn inventory_entries_include_generic_items() {
+        let mut world = World::new();
+        world.insert_resource(InventoryMenuState::default());
+        let player = spawn_player(&mut world);
+        world.spawn((
+            Item,
+            DisplayName("cracked ceramic cup".to_owned()),
+            CargoStats {
+                weight: 3.0,
+                volume: 1.0,
+            },
+            CarriedBy {
+                holder: player,
+                slot: CarrySlot::Chest,
+            },
+        ));
+
+        let entries = InventoryEntry::all_from_world(&mut world);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].label, "cracked ceramic cup (3 weight)");
+        assert!(entries[0].selected);
+    }
+
+    #[test]
+    fn inventory_entry_label_falls_back_to_cargo_kind() {
+        assert_eq!(inventory_entry_label(None, 6.0, true), "Parcel (6 weight)");
+        assert_eq!(inventory_entry_label(None, 3.0, false), "Item (3 weight)");
     }
 }

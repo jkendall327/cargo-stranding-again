@@ -52,7 +52,7 @@ fn draw_inventory_menu(world: &mut World) {
     let entries = InventoryEntry::all_from_world(world);
     if entries.is_empty() {
         draw_text(
-            "No carried parcels.",
+            "No carried cargo.",
             panel_x + 42.0,
             y,
             22.0,
