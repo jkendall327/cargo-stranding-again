@@ -9,7 +9,9 @@ use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
 use crate::cargo::{CargoStats, Item};
+use crate::components::Position;
 use crate::ids::ItemDefinitionId;
+use crate::persistence::{PersistentId, PersistentIdAllocator};
 
 /// Human-facing item label copied from a definition at spawn time.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -98,6 +100,28 @@ pub enum ItemComponentKind {
     Material,
     Form,
     Medicine,
+}
+
+/// Persistence policy for one spawned item instance.
+///
+/// Definitions describe what an item is; this describes whether this particular
+/// instance is important enough to survive save/load.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ItemPersistence {
+    #[default]
+    None,
+    Specific(PersistentId),
+    Allocate,
+}
+
+/// Instance-specific data added around an item definition at spawn time.
+///
+/// Worldgen, save loading, and authored fixtures can share this without each
+/// becoming their own partial item factory.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemSpawnContext {
+    pub position: Option<Position>,
+    pub persistence: ItemPersistence,
 }
 
 /// Author-authored blueprint for spawning one kind of item.
@@ -198,10 +222,17 @@ pub fn spawn_item(
     world: &mut World,
     definitions: &ItemDefinitions,
     id: &ItemDefinitionId,
+    context: ItemSpawnContext,
 ) -> Result<Entity, ItemSpawnError> {
     let definition = definitions
         .get(id)
         .ok_or_else(|| ItemSpawnError::UnknownDefinition(id.clone()))?;
+
+    let persistent_id = match context.persistence {
+        ItemPersistence::None => None,
+        ItemPersistence::Specific(id) => Some(id),
+        ItemPersistence::Allocate => Some(world.resource_mut::<PersistentIdAllocator>().mint()),
+    };
 
     let mut entity = world.spawn((
         Item,
@@ -210,6 +241,12 @@ pub fn spawn_item(
     ));
     for component in &definition.components {
         component.insert(&mut entity);
+    }
+    if let Some(position) = context.position {
+        entity.insert(position);
+    }
+    if let Some(id) = persistent_id {
+        entity.insert(id);
     }
     Ok(entity.id())
 }
@@ -381,7 +418,8 @@ mod tests {
         let definitions = ItemDefinitions::new(vec![definition]).expect("registry should validate");
         let mut world = World::new();
 
-        let entity = spawn_item(&mut world, &definitions, &id).expect("item should spawn");
+        let entity = spawn_item(&mut world, &definitions, &id, ItemSpawnContext::default())
+            .expect("item should spawn");
         let entity_ref = world.entity(entity);
 
         assert!(entity_ref.contains::<Item>());
@@ -411,6 +449,51 @@ mod tests {
                 uses: 3
             })
         );
+    }
+
+    #[test]
+    fn spawn_item_can_insert_instance_context() {
+        let definition = load_item_definition_from_str(FEVERFEW).expect("definition should load");
+        let id = definition.id.clone();
+        let definitions = ItemDefinitions::new(vec![definition]).expect("registry should validate");
+        let mut world = World::new();
+
+        let entity = spawn_item(
+            &mut world,
+            &definitions,
+            &id,
+            ItemSpawnContext {
+                position: Some(Position { x: 2, y: 3 }),
+                persistence: ItemPersistence::Specific(PersistentId(99)),
+            },
+        )
+        .expect("item should spawn");
+        let entity_ref = world.entity(entity);
+
+        assert_eq!(entity_ref.get::<Position>(), Some(&Position { x: 2, y: 3 }));
+        assert_eq!(entity_ref.get::<PersistentId>(), Some(&PersistentId(99)));
+    }
+
+    #[test]
+    fn spawn_item_can_allocate_persistent_id() {
+        let definition = load_item_definition_from_str(FEVERFEW).expect("definition should load");
+        let id = definition.id.clone();
+        let definitions = ItemDefinitions::new(vec![definition]).expect("registry should validate");
+        let mut world = World::new();
+        world.insert_resource(PersistentIdAllocator::new(42));
+
+        let entity = spawn_item(
+            &mut world,
+            &definitions,
+            &id,
+            ItemSpawnContext {
+                position: None,
+                persistence: ItemPersistence::Allocate,
+            },
+        )
+        .expect("item should spawn");
+
+        assert_eq!(world.get::<PersistentId>(entity), Some(&PersistentId(42)));
     }
 
     #[test]

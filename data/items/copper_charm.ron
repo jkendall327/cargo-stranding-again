@@ -1,0 +1,16 @@
+(
+    id: "copper_charm",
+    display_name: "copper charm",
+    description: "A small hammered charm carried by porters for luck and trade.",
+    tags: [
+        TradeGood,
+    ],
+    components: [
+        CargoStats(
+            weight: 0.1,
+            volume: 0.1,
+        ),
+        Material(Metal),
+        Form(LooseObject),
+    ],
+)

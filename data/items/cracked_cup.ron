@@ -1,0 +1,16 @@
+(
+    id: "cracked_cup",
+    display_name: "cracked ceramic cup",
+    description: "A chipped cup, more useful as salvage than as tableware.",
+    tags: [
+        TradeGood,
+    ],
+    components: [
+        CargoStats(
+            weight: 0.4,
+            volume: 0.5,
+        ),
+        Material(Ceramic),
+        Form(LooseObject),
+    ],
+)

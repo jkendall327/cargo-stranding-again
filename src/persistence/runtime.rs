@@ -282,6 +282,7 @@ pub fn save_loose_cargo(world: &mut World) -> Result<Vec<SavedCargoItem>, CargoS
         Option<&PersistentId>,
         &Position,
         &CargoStats,
+        Option<&ItemDefinitionId>,
         Option<&CargoParcel>,
         Option<&ParcelDelivery>,
         Option<&Container>,
@@ -295,6 +296,7 @@ pub fn save_loose_cargo(world: &mut World) -> Result<Vec<SavedCargoItem>, CargoS
         persistent_id,
         position,
         stats,
+        definition_id,
         parcel_marker,
         parcel_delivery,
         container,
@@ -311,7 +313,11 @@ pub fn save_loose_cargo(world: &mut World) -> Result<Vec<SavedCargoItem>, CargoS
             .ok_or(CargoSaveError::MissingPersistentId { entity })?;
         cargo.push(SavedCargoItem {
             id,
-            definition_id: cargo_definition_id(parcel_marker.is_some(), container.is_some()),
+            definition_id: saved_cargo_definition_id(
+                definition_id,
+                parcel_marker.is_some(),
+                container.is_some(),
+            ),
             stats: SavedCargoStats {
                 weight: stats.weight,
                 volume: stats.volume,
@@ -345,6 +351,7 @@ fn save_cargo_owned_by_holder(
         Entity,
         Option<&PersistentId>,
         &CargoStats,
+        Option<&ItemDefinitionId>,
         Option<&CargoParcel>,
         Option<&ParcelDelivery>,
         Option<&Container>,
@@ -357,6 +364,7 @@ fn save_cargo_owned_by_holder(
         entity,
         persistent_id,
         stats,
+        definition_id,
         parcel_marker,
         parcel_delivery,
         container,
@@ -385,7 +393,11 @@ fn save_cargo_owned_by_holder(
             .ok_or(CharacterSaveError::MissingPersistentId { entity })?;
         cargo.push(SavedCargoItem {
             id,
-            definition_id: cargo_definition_id(parcel_marker.is_some(), container.is_some()),
+            definition_id: saved_cargo_definition_id(
+                definition_id,
+                parcel_marker.is_some(),
+                container.is_some(),
+            ),
             stats: SavedCargoStats {
                 weight: stats.weight,
                 volume: stats.volume,
@@ -425,6 +437,7 @@ pub fn spawn_saved_loose_cargo(
         let mut entity = world.spawn((
             Item,
             item.id,
+            item.definition_id.clone(),
             Position { x, y },
             CargoStats {
                 weight: item.stats.weight,
@@ -461,6 +474,7 @@ fn spawn_saved_cargo(
         let mut entity = world.spawn((
             Item,
             item.id,
+            item.definition_id.clone(),
             CargoStats {
                 weight: item.stats.weight,
                 volume: item.stats.volume,
@@ -658,6 +672,16 @@ fn cargo_definition_id(is_parcel: bool, is_container: bool) -> ItemDefinitionId 
         GENERIC_ITEM_DEFINITION_ID
     };
     ItemDefinitionId(id.to_owned())
+}
+
+fn saved_cargo_definition_id(
+    definition_id: Option<&ItemDefinitionId>,
+    is_parcel: bool,
+    is_container: bool,
+) -> ItemDefinitionId {
+    definition_id
+        .cloned()
+        .unwrap_or_else(|| cargo_definition_id(is_parcel, is_container))
 }
 
 fn saved_parcel_state(

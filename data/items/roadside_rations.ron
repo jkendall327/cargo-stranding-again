@@ -1,0 +1,17 @@
+(
+    id: "roadside_rations",
+    display_name: "roadside ration bundle",
+    description: "A cloth-wrapped bundle of dried food left near the road.",
+    tags: [
+        Organic,
+        TradeGood,
+    ],
+    components: [
+        CargoStats(
+            weight: 1.2,
+            volume: 1.0,
+        ),
+        Material(Cloth),
+        Form(Bundle),
+    ],
+)

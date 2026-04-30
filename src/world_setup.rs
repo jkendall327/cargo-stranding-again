@@ -4,9 +4,13 @@ use crate::cargo::{
     Cargo, CargoParcel, CargoStats, CarriedBy, CarrySlot, Container, Item, ParcelDelivery,
 };
 use crate::components::*;
+use crate::data::items::{
+    init_item_definitions, spawn_item, ItemDefinitions, ItemPersistence, ItemSpawnContext,
+};
 use crate::energy::ActionEnergy;
+use crate::ids::ItemDefinitionId;
 use crate::input::KeyBindings;
-use crate::map::Map;
+use crate::map::{Map, TileCoord};
 use crate::persistence::{PersistentId, PersistentIdAllocator};
 use crate::resources::{
     Camera, CargoLossRisk, DeliveryStats, EnergyTimeline, GameScreen, InputRepeat, InventoryIntent,
@@ -26,6 +30,7 @@ pub fn init_world(world: &mut World) {
 
     init_resources(world, Map::generate());
     spawn_authored_entities(world);
+    spawn_generated_items(world);
     reserve_existing_persistent_ids(world);
     debug_assert_unique_persistent_ids(world);
 
@@ -62,6 +67,7 @@ pub fn init_resources(world: &mut World, map: Map) {
     world.insert_resource(SimulationClock { turn: 0 });
     world.insert_resource(DeliveryStats::default());
     crate::messages::init_simulation_messages(world);
+    init_item_definitions(world, "data/items").expect("item definitions should load at startup");
 }
 
 fn spawn_authored_entities(world: &mut World) {
@@ -171,6 +177,33 @@ fn spawn_authored_entities(world: &mut World) {
     }
 }
 
+fn spawn_generated_items(world: &mut World) {
+    let definitions = world.resource::<ItemDefinitions>().clone();
+    let map = world.resource::<Map>().clone();
+    for (id, coord) in [
+        ("feverfew_package", TileCoord::new(10, 31)),
+        ("copper_charm", TileCoord::new(12, 31)),
+        ("roadside_rations", TileCoord::new(14, 31)),
+        ("cracked_cup", TileCoord::new(16, 31)),
+    ] {
+        debug_assert!(
+            map.terrain_at_coord(coord)
+                .is_some_and(|terrain| terrain.passable()),
+            "generated item {id} must be placed on a passable tile"
+        );
+        spawn_item(
+            world,
+            &definitions,
+            &ItemDefinitionId(id.to_owned()),
+            ItemSpawnContext {
+                position: Some(coord.into()),
+                persistence: ItemPersistence::Allocate,
+            },
+        )
+        .expect("generated item definition should exist");
+    }
+}
+
 pub fn reserve_existing_persistent_ids(world: &mut World) {
     let mut query = world.query::<&PersistentId>();
     let ids = query.iter(world).copied().collect::<Vec<_>>();
@@ -200,7 +233,7 @@ fn debug_assert_unique_persistent_ids(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::{save_world_data, WorldId};
+    use crate::persistence::{save_world_data, SavedEntity, WorldId};
     use std::collections::HashSet;
 
     #[test]
@@ -215,7 +248,7 @@ mod tests {
             .filter(|(_, actor, item, _)| actor.is_some() || item.is_some())
             .collect::<Vec<_>>();
 
-        assert_eq!(persistent_entities.len(), 12);
+        assert_eq!(persistent_entities.len(), 16);
         assert!(
             persistent_entities.iter().all(|(_, _, _, id)| id.is_some()),
             "all authored actors and cargo items should have persistent IDs"
@@ -235,6 +268,19 @@ mod tests {
 
         let saved = save_world_data(&mut world, WorldId(1)).expect("initial world should save");
 
-        assert_eq!(saved.world_entities.len(), 7);
+        assert_eq!(saved.world_entities.len(), 11);
+        let saved_feverfew = saved
+            .world_entities
+            .iter()
+            .filter_map(|entity| match entity {
+                SavedEntity::CargoItem(item) => Some(item),
+                SavedEntity::Porter(_) => None,
+            })
+            .find(|item| item.definition_id.as_str() == "feverfew_package")
+            .expect("generated data item should be saved with its definition id");
+        assert_eq!(
+            saved_feverfew.location,
+            crate::persistence::SavedCargoLocation::Loose { x: 10, y: 31 }
+        );
     }
 }
