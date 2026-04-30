@@ -21,31 +21,125 @@ pub enum Terrain {
     Depot,
 }
 
+/// Authoritative static gameplay and presentation data for one terrain kind.
+///
+/// `Terrain` remains the compact map-storage value; this definition table keeps
+/// the tunable meaning of each terrain in one place until external data files
+/// are worth the extra loading and validation machinery.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainDefinition {
+    pub name: &'static str,
+    pub movement_cost: f32,
+    pub stamina_delta: f32,
+    pub passable: bool,
+    pub glyph: char,
+    pub color_rgba: [u8; 4],
+}
+
 impl Terrain {
-    pub fn movement_cost(self) -> f32 {
+    pub fn definition(self) -> &'static TerrainDefinition {
         match self {
-            Terrain::Grass => 1.0,
-            Terrain::Mud => 2.2,
-            Terrain::Rock => 3.0,
-            Terrain::Water => 4.0,
-            Terrain::Road => 0.6,
-            Terrain::Depot => 0.8,
+            Terrain::Grass => &GRASS_DEFINITION,
+            Terrain::Mud => &MUD_DEFINITION,
+            Terrain::Rock => &ROCK_DEFINITION,
+            Terrain::Water => &WATER_DEFINITION,
+            Terrain::Road => &ROAD_DEFINITION,
+            Terrain::Depot => &DEPOT_DEFINITION,
         }
+    }
+
+    pub fn movement_cost(self) -> f32 {
+        self.definition().movement_cost
     }
 
     pub fn stamina_delta(self) -> f32 {
-        match self {
-            Terrain::Grass => 0.0,
-            Terrain::Mud => -2.0,
-            Terrain::Rock => -3.5,
-            Terrain::Water => 0.0,
-            Terrain::Road => 0.75,
-            Terrain::Depot => 1.5,
-        }
+        self.definition().stamina_delta
     }
 
     pub fn passable(self) -> bool {
-        self != Terrain::Water
+        self.definition().passable
+    }
+
+    pub fn glyph(self) -> char {
+        self.definition().glyph
+    }
+}
+
+const GRASS_DEFINITION: TerrainDefinition = TerrainDefinition {
+    name: "grass",
+    movement_cost: 1.0,
+    stamina_delta: 0.0,
+    passable: true,
+    glyph: '.',
+    color_rgba: [64, 128, 72, 255],
+};
+
+const MUD_DEFINITION: TerrainDefinition = TerrainDefinition {
+    name: "mud",
+    movement_cost: 2.2,
+    stamina_delta: -2.0,
+    passable: true,
+    glyph: '~',
+    color_rgba: [104, 75, 48, 255],
+};
+
+const ROCK_DEFINITION: TerrainDefinition = TerrainDefinition {
+    name: "rock",
+    movement_cost: 3.0,
+    stamina_delta: -3.5,
+    passable: true,
+    glyph: '^',
+    color_rgba: [92, 96, 100, 255],
+};
+
+const WATER_DEFINITION: TerrainDefinition = TerrainDefinition {
+    name: "water",
+    movement_cost: 4.0,
+    stamina_delta: 0.0,
+    passable: false,
+    glyph: 'w',
+    color_rgba: [34, 92, 138, 255],
+};
+
+const ROAD_DEFINITION: TerrainDefinition = TerrainDefinition {
+    name: "road",
+    movement_cost: 0.6,
+    stamina_delta: 0.75,
+    passable: true,
+    glyph: '=',
+    color_rgba: [150, 126, 78, 255],
+};
+
+const DEPOT_DEFINITION: TerrainDefinition = TerrainDefinition {
+    name: "depot",
+    movement_cost: 0.8,
+    stamina_delta: 1.5,
+    passable: true,
+    glyph: 'D',
+    color_rgba: [214, 174, 68, 255],
+};
+
+#[cfg(test)]
+mod terrain_definition_tests {
+    use super::*;
+
+    #[test]
+    fn terrain_variants_have_distinct_authoritative_definitions() {
+        let terrains = [
+            Terrain::Grass,
+            Terrain::Mud,
+            Terrain::Rock,
+            Terrain::Water,
+            Terrain::Road,
+            Terrain::Depot,
+        ];
+
+        for terrain in terrains {
+            let definition = terrain.definition();
+            assert!(!definition.name.is_empty());
+            assert!(definition.movement_cost > 0.0);
+            assert_eq!(terrain.glyph(), definition.glyph);
+        }
     }
 }
 

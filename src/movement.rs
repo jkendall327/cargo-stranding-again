@@ -173,7 +173,7 @@ pub fn resolve_movement(map: &Map, request: MovementRequest) -> MovementOutcome 
 fn edge_is_walkable(edge: crate::map::MovementEdge) -> bool {
     if edge.target.terrain == Terrain::Water {
         edge.target.water_depth <= SHALLOW_WATER_MAX_DEPTH
-    } else if !edge.target.terrain.passable() {
+    } else if !edge.target.terrain.definition().passable {
         false
     } else {
         edge.elevation_delta <= MAX_WALKABLE_UP_STEP
@@ -182,7 +182,7 @@ fn edge_is_walkable(edge: crate::map::MovementEdge) -> bool {
 }
 
 pub fn terrain_cooldown_cost(terrain: Terrain) -> u32 {
-    (6.0 + terrain.movement_cost() * 5.0) as u32
+    (6.0 + terrain.definition().movement_cost * 5.0) as u32
 }
 
 fn movement_cooldown_cost(terrain: Terrain, mode: MovementMode) -> u32 {
@@ -195,7 +195,7 @@ fn movement_cooldown_cost(terrain: Terrain, mode: MovementMode) -> u32 {
 }
 
 fn stamina_delta_for(terrain: Terrain, mode: MovementMode, cargo: CargoLoad) -> f32 {
-    let terrain_delta = terrain.stamina_delta();
+    let terrain_delta = terrain.definition().stamina_delta;
     match mode {
         MovementMode::Walking => {
             if terrain_delta.is_sign_negative() {

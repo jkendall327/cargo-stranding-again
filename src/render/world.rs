@@ -105,9 +105,9 @@ fn draw_map(map: &Map, camera: Camera) {
                 8.0,
                 Color::from_rgba(210, 235, 255, 210),
             );
-        } else if matches!(terrain_glyph(tile.terrain), "D" | "^") {
+        } else if matches!(tile.terrain.glyph(), 'D' | '^') {
             draw_text(
-                terrain_glyph(tile.terrain),
+                &tile.terrain.glyph().to_string(),
                 px + 4.0,
                 py + 12.5,
                 14.0,
@@ -118,14 +118,8 @@ fn draw_map(map: &Map, camera: Camera) {
 }
 
 fn terrain_color(terrain: Terrain, elevation: i16, water_depth: u8) -> Color {
-    let base = match terrain {
-        Terrain::Grass => Color::from_rgba(64, 128, 72, 255),
-        Terrain::Mud => Color::from_rgba(104, 75, 48, 255),
-        Terrain::Rock => Color::from_rgba(92, 96, 100, 255),
-        Terrain::Water => Color::from_rgba(34, 92, 138, 255),
-        Terrain::Road => Color::from_rgba(150, 126, 78, 255),
-        Terrain::Depot => Color::from_rgba(214, 174, 68, 255),
-    };
+    let [r, g, b, a] = terrain.definition().color_rgba;
+    let base = Color::from_rgba(r, g, b, a);
     if terrain == Terrain::Water {
         shade_color(base, -(f32::from(water_depth) * 0.09))
     } else {
@@ -139,17 +133,6 @@ fn shade_color(color: Color, amount: f32) -> Color {
         g: (color.g + amount).clamp(0.0, 1.0),
         b: (color.b + amount).clamp(0.0, 1.0),
         a: color.a,
-    }
-}
-
-fn terrain_glyph(terrain: Terrain) -> &'static str {
-    match terrain {
-        Terrain::Grass => ".",
-        Terrain::Mud => "~",
-        Terrain::Rock => "^",
-        Terrain::Water => "w",
-        Terrain::Road => "=",
-        Terrain::Depot => "D",
     }
 }
 

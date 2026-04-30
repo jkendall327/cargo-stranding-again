@@ -369,17 +369,9 @@ pub fn ascii_viewport(world: &mut World) -> Option<String> {
 }
 
 fn terrain_glyph(map: &Map, coord: TileCoord) -> char {
-    match map
-        .terrain_at_coord(coord)
+    map.terrain_at_coord(coord)
         .expect("camera iteration is in bounds")
-    {
-        crate::map::Terrain::Grass => '.',
-        crate::map::Terrain::Mud => '~',
-        crate::map::Terrain::Rock => '^',
-        crate::map::Terrain::Water => 'w',
-        crate::map::Terrain::Road => '=',
-        crate::map::Terrain::Depot => 'D',
-    }
+        .glyph()
 }
 
 fn mark_parcels(world: &mut World, camera: Camera, rows: &mut [String]) {

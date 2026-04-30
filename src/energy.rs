@@ -26,7 +26,8 @@ impl ActionEnergy {
 }
 
 pub fn movement_energy_cost(terrain: Terrain, mode: MovementMode) -> u32 {
-    let terrain_cost = (WALK_ENERGY_COST as f32 * terrain.movement_cost()).round() as u32;
+    let terrain_cost =
+        (WALK_ENERGY_COST as f32 * terrain.definition().movement_cost).round() as u32;
     match mode {
         MovementMode::Walking => terrain_cost.max(1),
         MovementMode::Sprinting => ((terrain_cost as f32) * 0.65).round().max(1.0) as u32,
