@@ -145,3 +145,147 @@ Headless ASCII inspection should expose:
 - paths/path quality
 
 This is important because the world is too large to tune by walking around manually.
+
+## Implementation Notes
+
+### Current Map Shape
+
+The current map code is already close to the desired streaming shape:
+
+- Gameplay systems use global `TileCoord`s.
+- `Map` translates global tiles into `ChunkCoord` plus `LocalTileCoord`.
+- `Chunk` stores fixed `16x16` arrays of terrain, elevation, and water depth.
+- Loaded chunks are saved as exact tile history.
+- Missing chunks can already be generated from world seed plus chunk coordinate.
+
+Keep that boundary. Normal terrain should remain chunk data, not ECS entities.
+Realized chunks are authoritative: once a chunk has been generated, loaded,
+modified, or saved, its tile data is the source of truth for that part of the
+world.
+
+### First Slice Target
+
+Add a persistent coarse world layer and use it to realize chunks. For the first
+implementation, one coarse world cell can match one playable chunk. That keeps
+coordinate conversion simple:
+
+```text
+CoarseCoord(x, y) == ChunkCoord(x, y)
+CoarseCell        == broad plan for one 16x16 playable chunk
+Chunk             == realized 16x16 tile data
+```
+
+The world should be finite but very large. Do not target a world where a normal
+character can reasonably see most of it. A useful first scale is thousands of
+chunks in each dimension, not merely thousands of tiles total. Because the
+coarse layer stores one compact record per chunk, this can still be manageable
+if each coarse cell stays small.
+
+First-pass coarse cells should be boring and practical:
+
+- elevation band / broad height
+- moisture or climate hint
+- biome
+- optional path quality placeholder
+
+Skip rivers, settlements, civilisation records, and history simulation in the
+first implementation slice. Leave room in the data model for them, but do not
+block basic coarse-to-chunk realization on solving them.
+
+### Runtime Pipeline
+
+World creation:
+
+```text
+world seed
+  -> generate persistent WorldPlan / coarse grid once
+  -> save WorldPlan with the world
+```
+
+Chunk realization during play:
+
+```text
+player/camera approaches ChunkCoord
+  -> if saved chunk exists, load saved chunk
+  -> otherwise sample WorldPlan at/near ChunkCoord
+  -> realize a new Chunk
+  -> insert it into Map.loaded_chunks
+```
+
+Saving:
+
+```text
+WorldPlan is saved as persistent world metadata.
+Loaded chunks are saved as authoritative realized history.
+Unseen chunks are not saved individually; they can be realized later from the
+same WorldPlan.
+```
+
+This keeps the save model clear: the coarse world is the promise, realized
+chunks are the observed history.
+
+### Suggested Runtime Types
+
+The exact module split can change, but the concepts should stay separate:
+
+```rust
+pub struct WorldPlan {
+    pub seed: u64,
+    pub bounds: CoarseWorldBounds,
+    pub cell_size_tiles: i32,
+    pub cells: Vec<CoarseCell>,
+}
+
+pub struct CoarseCell {
+    pub elevation: i16,
+    pub moisture: u8,
+    pub biome: Biome,
+    pub path_quality: u8,
+}
+```
+
+For the first slice, `cell_size_tiles` should equal `CHUNK_WIDTH` and
+`CHUNK_HEIGHT`. If chunk width and height ever diverge, replace this with an
+explicit cell width/height.
+
+Chunk generation should move toward an interface shaped like:
+
+```rust
+pub fn realize_chunk(plan: &WorldPlan, coord: ChunkCoord) -> Chunk
+```
+
+The realization step can still use deterministic tile-level noise, but that
+noise should elaborate the coarse cell rather than inventing unrelated local
+geography. Neighboring coarse cells should be sampled when needed to avoid hard
+seams at chunk boundaries.
+
+### Persistence
+
+Add world-plan data beside the existing saved chunks. Existing saved chunk logic
+should remain conceptually the same:
+
+- `SavedWorldData` owns world metadata, including seed, bounds, and the coarse
+  plan.
+- `SavedChunk` owns exact realized tile data.
+- Loading a saved world restores the plan first, then restores realized chunks.
+- Generating an unseen chunk uses the restored plan, not a fresh random plan.
+
+This is also the point where `Map` may need to know less about raw generation.
+Prefer keeping `Map` as storage/query/streaming glue and moving world creation
+or chunk realization into a `worldgen` module once the generator grows.
+
+### Inspection Before Complexity
+
+Before adding rivers or settlements, add inspection tools for the coarse layer.
+The game will be too large to tune by walking. Headless/debug views should be
+able to show at least:
+
+- coarse elevation
+- biome
+- moisture
+- realized chunk presence vs unseen coarse cells
+- path quality if included in the first slice
+
+Rivers, settlements, civilisation influence, and named historical features can
+then be layered onto a debuggable base instead of being mixed into the initial
+terrain generator.
