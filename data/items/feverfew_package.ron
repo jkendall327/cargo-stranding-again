@@ -1,0 +1,23 @@
+(
+    id: "feverfew_package",
+    display_name: "package of feverfew medicinal herbs",
+    description: "A wrapped bundle of dried feverfew, useful for simple field medicine.",
+    tags: [
+        Herb,
+        Medicinal,
+        Organic,
+        TradeGood,
+    ],
+    components: [
+        CargoStats(
+            weight: 0.2,
+            volume: 0.3,
+        ),
+        Material(PlantMatter),
+        Form(Package),
+        Medicine(
+            potency: 0.35,
+            uses: 3,
+        ),
+    ],
+)

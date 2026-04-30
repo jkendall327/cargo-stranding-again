@@ -2,6 +2,7 @@ pub mod ai;
 pub mod app;
 pub mod cargo;
 pub mod components;
+pub mod data;
 pub mod energy;
 pub mod headless;
 pub mod input;

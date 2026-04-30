@@ -54,11 +54,11 @@ Goal: stop hardcoding every terrain/item stat in Rust once the domain model sett
 - [ ] Introduce stable terrain IDs in the map.
   - [ ] Keep the existing `Terrain` enum until there is a clear benefit to replacing it.
   - [ ] Consider `TerrainId` plus `TerrainDefinition`.
-- [ ] Move terrain definitions out of `Terrain` methods.
-  - [ ] movement cost
-  - [ ] stamina delta
-  - [ ] passability
-  - [ ] color/glyph, unless rendering gets its own definition layer
+- [x] Move terrain definitions out of `Terrain` methods.
+  - [x] movement cost
+  - [x] stamina delta
+  - [x] passability
+  - [x] color/glyph, unless rendering gets its own definition layer
   - [ ] later: elevation behavior, wetness, exposure, wind shelter, traction
 - [ ] Add a `TerrainDefinitions` resource.
 - [ ] Load default terrain definitions at startup.
