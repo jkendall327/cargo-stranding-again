@@ -22,11 +22,6 @@ pub struct WorldId(pub u128);
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct CharacterId(pub u128);
 
-/// Stable definition key for data-driven item defaults.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ItemDefinitionId(pub String);
-
 /// Monotonic source for new persistent entity IDs in a live world.
 ///
 /// Authored starter content can use fixed IDs for deterministic saves. Dynamic

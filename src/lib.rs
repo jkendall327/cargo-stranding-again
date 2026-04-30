@@ -5,6 +5,7 @@ pub mod components;
 pub mod data;
 pub mod energy;
 pub mod headless;
+pub mod ids;
 pub mod input;
 pub mod logging;
 pub mod map;

@@ -9,20 +9,7 @@ use bevy_ecs::prelude::*;
 use serde::Deserialize;
 
 use crate::cargo::{CargoStats, Item};
-
-/// Stable authoring ID for an item blueprint.
-///
-/// Save files and spawn tables should refer to this instead of display names,
-/// because display names are presentation and are likely to change.
-#[derive(Component, Clone, Debug, Hash, PartialEq, Eq, Deserialize)]
-#[serde(transparent)]
-pub struct ItemDefinitionId(pub String);
-
-impl ItemDefinitionId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
+use crate::ids::ItemDefinitionId;
 
 /// Human-facing item label copied from a definition at spawn time.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -229,30 +216,28 @@ pub fn spawn_item(
 
 fn validate_definition(definition: &ItemDefinition) -> Result<(), ItemDefinitionError> {
     if definition.id.as_str().trim().is_empty() {
-        return Err(ItemDefinitionError::EmptyId);
+        return Err(ItemDefinitionError::validation(
+            None,
+            "item definition has an empty id",
+        ));
     }
     if definition.display_name.trim().is_empty() {
-        return Err(ItemDefinitionError::EmptyDisplayName {
-            id: definition.id.clone(),
-        });
+        return Err(ItemDefinitionError::validation(
+            Some(definition.id.clone()),
+            "empty display name",
+        ));
     }
 
     let mut component_kinds = HashSet::new();
     for component in &definition.components {
         let kind = component.kind();
         if !component_kinds.insert(kind) {
-            return Err(ItemDefinitionError::DuplicateComponent {
-                id: definition.id.clone(),
-                kind,
-            });
+            return Err(ItemDefinitionError::validation(
+                Some(definition.id.clone()),
+                format!("duplicate component spec {kind:?}"),
+            ));
         }
         validate_component(definition, component)?;
-    }
-
-    if !component_kinds.contains(&ItemComponentKind::CargoStats) {
-        return Err(ItemDefinitionError::MissingCargoStats {
-            id: definition.id.clone(),
-        });
     }
 
     Ok(())
@@ -264,17 +249,19 @@ fn validate_component(
 ) -> Result<(), ItemDefinitionError> {
     match *component {
         ItemComponentSpec::CargoStats { weight, volume } => {
-            if weight < 0.0 || volume < 0.0 {
-                return Err(ItemDefinitionError::NegativeCargoStats {
-                    id: definition.id.clone(),
-                });
+            if !is_sensible_nonnegative_number(weight) || !is_sensible_nonnegative_number(volume) {
+                return Err(ItemDefinitionError::validation(
+                    Some(definition.id.clone()),
+                    "cargo stats must be finite and nonnegative",
+                ));
             }
         }
         ItemComponentSpec::Medicine { potency, uses } => {
-            if !(0.0..=1.0).contains(&potency) || uses == 0 {
-                return Err(ItemDefinitionError::InvalidMedicine {
-                    id: definition.id.clone(),
-                });
+            if !is_sensible_nonnegative_number(potency) || potency > 1.0 || uses == 0 {
+                return Err(ItemDefinitionError::validation(
+                    Some(definition.id.clone()),
+                    "medicinal properties require finite potency in 0.0..=1.0 and at least one use",
+                ));
             }
         }
         ItemComponentSpec::Material(_) | ItemComponentSpec::Form(_) => {}
@@ -282,28 +269,28 @@ fn validate_component(
     Ok(())
 }
 
+fn is_sensible_nonnegative_number(value: f32) -> bool {
+    value.is_finite() && value >= 0.0
+}
+
 #[derive(Debug)]
 pub enum ItemDefinitionError {
     Io(std::io::Error),
     Deserialize(ron::error::SpannedError),
-    EmptyId,
-    EmptyDisplayName {
-        id: ItemDefinitionId,
+    Validation {
+        id: Option<ItemDefinitionId>,
+        message: String,
     },
     DuplicateId(ItemDefinitionId),
-    DuplicateComponent {
-        id: ItemDefinitionId,
-        kind: ItemComponentKind,
-    },
-    MissingCargoStats {
-        id: ItemDefinitionId,
-    },
-    NegativeCargoStats {
-        id: ItemDefinitionId,
-    },
-    InvalidMedicine {
-        id: ItemDefinitionId,
-    },
+}
+
+impl ItemDefinitionError {
+    fn validation(id: Option<ItemDefinitionId>, message: impl Into<String>) -> Self {
+        Self::Validation {
+            id,
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for ItemDefinitionError {
@@ -313,37 +300,18 @@ impl fmt::Display for ItemDefinitionError {
             Self::Deserialize(error) => {
                 write!(formatter, "failed to parse item definition: {error}")
             }
-            Self::EmptyId => write!(formatter, "item definition has an empty id"),
-            Self::EmptyDisplayName { id } => {
-                write!(
-                    formatter,
-                    "item definition '{}' has an empty display name",
-                    id.as_str()
-                )
-            }
+            Self::Validation { id: None, message } => write!(formatter, "{message}"),
+            Self::Validation {
+                id: Some(id),
+                message,
+            } => write!(
+                formatter,
+                "item definition '{}' is invalid: {message}",
+                id.as_str()
+            ),
             Self::DuplicateId(id) => {
                 write!(formatter, "duplicate item definition id '{}'", id.as_str())
             }
-            Self::DuplicateComponent { id, kind } => write!(
-                formatter,
-                "item definition '{}' has duplicate component spec {kind:?}",
-                id.as_str()
-            ),
-            Self::MissingCargoStats { id } => write!(
-                formatter,
-                "item definition '{}' is missing required CargoStats",
-                id.as_str()
-            ),
-            Self::NegativeCargoStats { id } => write!(
-                formatter,
-                "item definition '{}' has negative cargo stats",
-                id.as_str()
-            ),
-            Self::InvalidMedicine { id } => write!(
-                formatter,
-                "item definition '{}' has invalid medicinal properties",
-                id.as_str()
-            ),
         }
     }
 }
@@ -353,13 +321,7 @@ impl Error for ItemDefinitionError {
         match self {
             Self::Io(error) => Some(error),
             Self::Deserialize(error) => Some(error),
-            Self::EmptyId
-            | Self::EmptyDisplayName { .. }
-            | Self::DuplicateId(_)
-            | Self::DuplicateComponent { .. }
-            | Self::MissingCargoStats { .. }
-            | Self::NegativeCargoStats { .. }
-            | Self::InvalidMedicine { .. } => None,
+            Self::Validation { .. } | Self::DuplicateId(_) => None,
         }
     }
 }
@@ -463,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_missing_cargo_stats() {
+    fn validation_allows_non_cargo_items() {
         let text = r#"(
             id: "floating_idea",
             display_name: "floating idea",
@@ -471,12 +433,48 @@ mod tests {
             components: [],
         )"#;
 
-        let error =
-            load_item_definition_from_str(text).expect_err("missing CargoStats should fail");
+        let definition =
+            load_item_definition_from_str(text).expect("CargoStats should be optional");
 
-        assert!(matches!(
-            error,
-            ItemDefinitionError::MissingCargoStats { .. }
-        ));
+        assert_eq!(definition.id.as_str(), "floating_idea");
+        assert!(definition.components.is_empty());
+    }
+
+    #[test]
+    fn validation_rejects_non_sensible_numbers() {
+        let definition = ItemDefinition {
+            id: ItemDefinitionId("impossible_box".to_owned()),
+            display_name: "impossible box".to_owned(),
+            description: String::new(),
+            tags: HashSet::new(),
+            components: vec![ItemComponentSpec::CargoStats {
+                weight: f32::INFINITY,
+                volume: 1.0,
+            }],
+        };
+
+        let error = ItemDefinitions::new(vec![definition])
+            .expect_err("infinite cargo values should fail validation");
+
+        assert!(matches!(error, ItemDefinitionError::Validation { .. }));
+    }
+
+    #[test]
+    fn validation_rejects_nan_medicine_potency() {
+        let definition = ItemDefinition {
+            id: ItemDefinitionId("strange_tincture".to_owned()),
+            display_name: "strange tincture".to_owned(),
+            description: String::new(),
+            tags: HashSet::new(),
+            components: vec![ItemComponentSpec::Medicine {
+                potency: f32::NAN,
+                uses: 1,
+            }],
+        };
+
+        let error = ItemDefinitions::new(vec![definition])
+            .expect_err("NaN medicine potency should fail validation");
+
+        assert!(matches!(error, ItemDefinitionError::Validation { .. }));
     }
 }
