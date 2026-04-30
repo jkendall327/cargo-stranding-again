@@ -197,8 +197,9 @@ they are drawn. Carried cargo renders as a badge on the actor holding it,
 including parcels inside carried containers.
 
 Inventory follows the same rule. The player's inventory is built by finding
-parcel entities carried directly by the player or contained inside containers
-the player carries.
+item entities carried directly by the player or contained inside containers the
+player carries. Some of those items may also be parcels, but delivery state is
+not what makes something appear in inventory.
 
 The UI may simplify how this is shown, but it should not become a second cargo
 model.
