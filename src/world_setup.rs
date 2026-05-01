@@ -128,10 +128,7 @@ fn spawn_authored_entities(world: &mut World) {
                 Position { x, y },
                 Velocity::default(),
                 Cargo { max_weight: 35.0 },
-                AssignedJob {
-                    phase: JobPhase::FindParcel,
-                    parcel: None,
-                },
+                AssignedJob::FindParcel,
                 ActionEnergy::default(),
             ))
             .id();

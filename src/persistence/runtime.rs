@@ -245,7 +245,7 @@ fn save_porters(world: &mut World) -> Result<Vec<SavedPorter>, WorldSaveError> {
             ActorSaveError::MissingPersistentId { entity },
         ))?;
         let job_parcel = job
-            .parcel
+            .parcel()
             .map(|parcel| {
                 world
                     .get::<PersistentId>(parcel)
@@ -262,7 +262,7 @@ fn save_porters(world: &mut World) -> Result<Vec<SavedPorter>, WorldSaveError> {
             y: position.y,
             cargo_max_weight: cargo.max_weight,
             action_energy: (*energy).into(),
-            job_phase: job.phase.into(),
+            job_phase: job.phase().into(),
             job_parcel,
         });
     }
@@ -612,10 +612,7 @@ fn spawn_saved_porter(world: &mut World, saved: &SavedPorter) -> Entity {
             Cargo {
                 max_weight: saved.cargo_max_weight,
             },
-            AssignedJob {
-                phase: saved.job_phase.into(),
-                parcel: None,
-            },
+            initial_saved_job(saved.job_phase),
             ActionEnergy::from(saved.action_energy),
         ))
         .id()
@@ -643,10 +640,29 @@ fn restore_saved_porter_jobs(
             })
             .transpose()?;
         if let Some(mut job) = world.get_mut::<AssignedJob>(porter_entity) {
-            job.parcel = job_parcel;
+            *job = assigned_job_from_saved(porter.job_phase, job_parcel);
         }
     }
     Ok(())
+}
+
+fn initial_saved_job(phase: SavedJobPhase) -> AssignedJob {
+    match phase {
+        SavedJobPhase::FindParcel | SavedJobPhase::GoToParcel | SavedJobPhase::GoToDepot => {
+            AssignedJob::FindParcel
+        }
+        SavedJobPhase::Done => AssignedJob::Done,
+    }
+}
+
+fn assigned_job_from_saved(phase: SavedJobPhase, parcel: Option<Entity>) -> AssignedJob {
+    match (phase, parcel) {
+        (SavedJobPhase::FindParcel, _) => AssignedJob::FindParcel,
+        (SavedJobPhase::GoToParcel, Some(parcel)) => AssignedJob::GoToParcel { parcel },
+        (SavedJobPhase::GoToDepot, Some(parcel)) => AssignedJob::GoToDepot { parcel },
+        (SavedJobPhase::Done, _) => AssignedJob::Done,
+        (SavedJobPhase::GoToParcel | SavedJobPhase::GoToDepot, None) => AssignedJob::FindParcel,
+    }
 }
 
 fn player_carried_container_ids(

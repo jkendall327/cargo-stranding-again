@@ -41,9 +41,7 @@ pub fn update_porter_action_interest(
         });
 
     for (porter_entity, job) in &porters {
-        let has_active_job =
-            job.parcel.is_some() && !matches!(job.phase, JobPhase::FindParcel | JobPhase::Done);
-        if has_loose_parcel || has_active_job {
+        if has_loose_parcel || job.is_active() {
             commands.entity(porter_entity).insert(WantsAction);
         } else {
             commands.entity(porter_entity).remove::<WantsAction>();
@@ -56,7 +54,7 @@ pub fn assign_porter_jobs(
     mut porters: Query<(Entity, &mut AssignedJob), With<Porter>>,
 ) {
     for (porter_entity, mut job) in &mut porters {
-        if job.parcel.is_some() && job.phase != JobPhase::Done {
+        if job.is_active() {
             continue;
         }
 
@@ -71,11 +69,11 @@ pub fn assign_porter_jobs(
                 })
         {
             *delivery = ParcelDelivery::ReservedBy(porter_entity);
-            job.parcel = Some(parcel_entity);
-            job.phase = JobPhase::GoToParcel;
+            *job = AssignedJob::GoToParcel {
+                parcel: parcel_entity,
+            };
         } else {
-            job.parcel = None;
-            job.phase = JobPhase::FindParcel;
+            *job = AssignedJob::FindParcel;
         }
     }
 }
@@ -93,12 +91,11 @@ pub fn porter_jobs(world: &mut World) {
             continue;
         };
 
-        let Some(parcel_entity) = snapshot.job.parcel else {
-            continue;
-        };
-        match snapshot.job.phase {
-            JobPhase::FindParcel | JobPhase::Done => {}
-            JobPhase::GoToParcel => {
+        match snapshot.job {
+            AssignedJob::FindParcel | AssignedJob::Done => {}
+            AssignedJob::GoToParcel {
+                parcel: parcel_entity,
+            } => {
                 let Some((parcel_position, parcel_state)) = parcel_snapshot(world, parcel_entity)
                 else {
                     clear_porter_job(world, porter_entity);
@@ -129,7 +126,9 @@ pub fn porter_jobs(world: &mut World) {
 
                 move_porter_toward(world, &map, porter_entity, parcel_position, now);
             }
-            JobPhase::GoToDepot => {
+            AssignedJob::GoToDepot {
+                parcel: parcel_entity,
+            } => {
                 let depot = map.depot_coord();
                 if TileCoord::from(snapshot.position) == depot {
                     world
@@ -198,18 +197,8 @@ fn parcel_snapshot(world: &mut World, parcel_entity: Entity) -> Option<(Position
 }
 
 fn clear_porter_job(world: &mut World, porter_entity: Entity) {
-    set_porter_job(world, porter_entity, JobPhase::FindParcel, None);
-}
-
-fn set_porter_job(
-    world: &mut World,
-    porter_entity: Entity,
-    phase: JobPhase,
-    parcel: Option<Entity>,
-) {
     if let Some(mut job) = world.get_mut::<AssignedJob>(porter_entity) {
-        job.phase = phase;
-        job.parcel = parcel;
+        *job = AssignedJob::FindParcel;
     }
 }
 
@@ -303,10 +292,7 @@ mod tests {
                 position,
                 Velocity::default(),
                 Cargo { max_weight: 35.0 },
-                AssignedJob {
-                    phase: JobPhase::FindParcel,
-                    parcel: None,
-                },
+                AssignedJob::FindParcel,
                 ActionEnergy::default(),
             ))
             .id();
@@ -355,7 +341,7 @@ mod tests {
         let mut job_query = world.query::<&AssignedJob>();
         let assigned_jobs = job_query
             .iter(&world)
-            .filter(|job| matches!(job.phase, JobPhase::GoToParcel) && job.parcel.is_some())
+            .filter(|job| matches!(job, AssignedJob::GoToParcel { .. }))
             .count();
         assert_eq!(assigned_jobs, 2);
 
@@ -454,7 +440,7 @@ mod tests {
         let (job, energy) = porter_query
             .single(&world)
             .expect("test setup should leave exactly one porter");
-        assert!(matches!(job.phase, JobPhase::GoToDepot));
+        assert!(matches!(job, AssignedJob::GoToDepot { .. }));
         assert_eq!(energy.ready_at, u64::from(ITEM_ACTION_ENERGY_COST));
     }
 }

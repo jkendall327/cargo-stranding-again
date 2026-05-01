@@ -303,7 +303,7 @@ impl PorterDebugRow {
         let snapshots = query
             .iter(world)
             .map(|(entity, position, porter, job, energy)| {
-                (entity, *position, porter.id, job.phase, *energy)
+                (entity, *position, porter.id, job.phase(), *energy)
             })
             .collect::<Vec<_>>();
         let mut rows = snapshots

@@ -173,7 +173,7 @@ fn draw_porters(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRend
     let mut query = world.query::<(Entity, &Position, &Porter, &AssignedJob)>();
     let porters = query
         .iter(world)
-        .map(|(entity, position, porter, job)| (entity, *position, porter.id, job.phase))
+        .map(|(entity, position, porter, job)| (entity, *position, porter.id, job.phase()))
         .collect::<Vec<_>>();
     for (entity, position, porter_id, phase) in porters {
         if !camera.contains(position) {

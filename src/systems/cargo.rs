@@ -8,7 +8,7 @@ use crate::cargo::{
     CargoStats, CargoTarget, CarriedBy, CarrySlot, ContainedIn, ContainedLoad, Container,
     ContainerLoad, DirectCarryLoad, Item, ParcelDelivery,
 };
-use crate::components::{ActionEnergy, AssignedJob, JobPhase, Player, Porter, Position};
+use crate::components::{ActionEnergy, AssignedJob, Player, Porter, Position};
 use crate::energy::ITEM_ACTION_ENERGY_COST;
 use crate::resources::{DeliveryStats, EnergyTimeline, InventoryMenuState};
 
@@ -468,17 +468,16 @@ fn handle_successful_job_result(
         return;
     };
 
-    if job.parcel != Some(event.item) {
+    if job.parcel() != Some(event.item) {
         return;
     }
 
     match event.action {
         CargoAction::PickUp => {
-            job.phase = JobPhase::GoToDepot;
+            *job = AssignedJob::GoToDepot { parcel: event.item };
         }
         CargoAction::Deliver => {
-            job.phase = JobPhase::Done;
-            job.parcel = None;
+            *job = AssignedJob::Done;
             delivery_stats.delivered_parcels += 1;
         }
         CargoAction::Drop => {}
@@ -493,9 +492,8 @@ fn clear_failed_porter_job(
         return;
     };
 
-    if job.parcel == Some(event.item) {
-        job.phase = JobPhase::FindParcel;
-        job.parcel = None;
+    if job.parcel() == Some(event.item) {
+        *job = AssignedJob::FindParcel;
     }
 }
 
@@ -954,18 +952,14 @@ mod tests {
             .spawn((
                 Porter { id: 0 },
                 Cargo { max_weight: 40.0 },
-                AssignedJob {
-                    phase: JobPhase::GoToDepot,
-                    parcel: None,
-                },
+                AssignedJob::Done,
                 ActionEnergy::default(),
             ))
             .id();
         let parcel = spawn_loose_parcel(&mut world, Position { x: 1, y: 1 }, 5.0);
-        world.entity_mut(actor).insert(AssignedJob {
-            phase: JobPhase::GoToDepot,
-            parcel: Some(parcel),
-        });
+        world
+            .entity_mut(actor)
+            .insert(AssignedJob::GoToDepot { parcel });
         world
             .entity_mut(parcel)
             .insert(CarriedBy {

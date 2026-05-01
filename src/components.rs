@@ -105,10 +105,34 @@ impl MovementState {
     }
 }
 
-#[derive(Component, Clone, Copy, Debug)]
-pub struct AssignedJob {
-    pub phase: JobPhase,
-    pub parcel: Option<Entity>,
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssignedJob {
+    FindParcel,
+    GoToParcel { parcel: Entity },
+    GoToDepot { parcel: Entity },
+    Done,
+}
+
+impl AssignedJob {
+    pub fn phase(self) -> JobPhase {
+        match self {
+            Self::FindParcel => JobPhase::FindParcel,
+            Self::GoToParcel { .. } => JobPhase::GoToParcel,
+            Self::GoToDepot { .. } => JobPhase::GoToDepot,
+            Self::Done => JobPhase::Done,
+        }
+    }
+
+    pub fn parcel(self) -> Option<Entity> {
+        match self {
+            Self::FindParcel | Self::Done => None,
+            Self::GoToParcel { parcel } | Self::GoToDepot { parcel } => Some(parcel),
+        }
+    }
+
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::GoToParcel { .. } | Self::GoToDepot { .. })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
