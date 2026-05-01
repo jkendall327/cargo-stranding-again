@@ -4,6 +4,7 @@ pub mod cargo;
 pub mod components;
 pub mod data;
 pub mod energy;
+pub mod gen;
 pub mod headless;
 pub mod ids;
 pub mod input;
