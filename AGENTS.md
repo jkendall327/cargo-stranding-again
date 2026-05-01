@@ -16,8 +16,10 @@ Verify your work with this command:
 
 - `cargo run --bin xtask -- verify`
 
-That command runs `cargo fmt --check`, `cargo clippy --all-targets`, and
-`cargo test` the headless scenario commands explained later.
+That command runs `cargo fmt`, `cargo clippy --all-targets`, and
+`cargo test`. It also includes the headless scenario commands explained later.
+
+You shouldn't need to run `cargo fmt` yourself manually because of this; just let the xtask handle it unless something crops up.
 
 ## Philosophy
 

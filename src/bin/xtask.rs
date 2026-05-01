@@ -5,8 +5,9 @@ use std::process::{Command, ExitCode};
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("format") => run_steps(&[("format", &["fmt"][..])]),
         Some("verify") => run_steps(&[
-            ("format", &["fmt", "--check"][..]),
+            ("format", &["fmt"][..]),
             ("clippy", &["clippy", "--all-targets"][..]),
             ("tests", &["test"][..]),
             (
@@ -43,5 +44,5 @@ fn run_steps(steps: &[(&str, &[&str])]) -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: cargo run --bin xtask -- verify");
+    eprintln!("usage: cargo run --bin xtask -- <format|verify>");
 }
