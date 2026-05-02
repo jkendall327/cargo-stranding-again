@@ -3,12 +3,9 @@
 This is a small Rust game using Macroquad for the window/input/render loop and
 standalone Bevy ECS for deterministic simulation state.
 
-Look at the TODO.md file. It contains a big task list for stuff we're going to be doing.
-If I mentioned numbers like '#3' I'm referring to stuff here.
-
 Look at glossary.md too. It's where I distinguish between things like 'cargo' and 'parcel'.
 
-You can use your `mcp__rust_lsp_plugin__` tool for some AST-style codebase manipulation stuff, probably cheaper than burning tokens doing things the hard way. Don't feel pressured to use it, but be aware it exists.
+Use your github MCP tools to access tickets; there is no github CLI installed locally.
 
 ## Verification
 
@@ -102,3 +99,41 @@ The harness prints one compact snapshot after each command, including turn,
 timeline, player position, stamina, cargo, parcel counts, and delivered parcels.
 It reuses the same `init_world` setup and simulation timeline system as the real
 game, so it is the preferred smoke test after gameplay logic changes.
+
+## Glossary
+
+These are *domain* terms, not terms as they are used in the code.
+
+Entity: something that persists over time in the game-world.
+
+Agent: an entity able to act autonomously, move, interact with the environment. A rock isn't an agent. People, animals and the wind are agents.
+
+NPC: an agent who isn't the player.
+
+Porter: an NPC who delivers parcels.
+
+Item: an object that an agent can pick and use.
+
+Container: an item which holds other items within it.
+
+Cargo: an object that an agent can pick up, use and carry on their person.
+
+Parcel: cargo that an agent delivers to a destination as part of a job. Cargo can cease to be a parcel if a job is cancelled.
+
+Carry slot: a place on an agent's body where they can carry cargo. E.g. back, hands, head.
+
+Depot: a place where parcels can be delivered.
+
+Goal: a state of affairs that an agent strives to make real in the game-world.
+
+Destination: a place an agent tries to reach as part of a goal.
+
+Job: a goal for an agent to deliver parcels to a depot.
+
+Energy: representation of how much work an agent is able to perform in an arbitrary unit of time in the game-world.
+
+Stamina: how much physical action an agent can undertake before exertion.
+
+Movement mode: an agent's style of movement. E.g. crawling, walking, sprinting.
+
+Chunk: a small portion of the world that is stored, saved and loaded independently.
