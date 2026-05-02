@@ -1,37 +1,12 @@
-# Cargo Stranding Again
+# Cargo Stranding
 
-A tiny Rust MVP for a 2D simulationist logistics/survival roguelike.
+MVP for a 2D simulationist logistics/survival roguelike. 
+Vibecoded by Codex, though I am trying to stay close to the code.
 
 It uses:
 
 - `macroquad` for the async frame loop, windowing, input, and drawing.
 - `bevy_ecs` standalone for game state and simulation systems.
-
-## Run
-
-```sh
-cargo run
-```
-
-## Headless Smoke Tests
-
-Run all JSON scenarios:
-
-```sh
-cargo run --bin headless -- all
-```
-
-Run one scenario:
-
-```sh
-cargo run --bin headless -- --scenario scenarios/headless/walk-east.json
-```
-
-Scenario files live in `scenarios/headless`. They issue headless commands and
-check the final snapshot with an `expect` object. Failed scenarios print a final
-ASCII camera view automatically. Add `"view": true` to print that view on
-success too. Headless logs are quiet by default; set `RUST_LOG` when you need
-tracing output.
 
 ## Docs
 
@@ -56,4 +31,5 @@ tracing output.
 - Timeline energy advances only when movement succeeds, pickup succeeds, or you wait. Failed movement and failed pickup do not spend energy.
 - Waiting recovers stamina directly.
 
-The prototype spawns loose cargo parcels, NPC porters, one depot, and simple delivery jobs. Porters pathfind to parcels, pick them up, pathfind to the depot, and drop them off.
+The prototype spawns loose cargo parcels, NPC porters, one depot, and simple delivery jobs. 
+Porters pathfind to parcels, pick them up, pathfind to the depot, and drop them off.
