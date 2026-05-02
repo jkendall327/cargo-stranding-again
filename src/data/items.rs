@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::cargo::{CargoStats, Item};
 use crate::components::Position;
-use crate::ids::ItemDefinitionId;
+use crate::infra::ids::ItemDefinitionId;
 use crate::persistence::{PersistentId, PersistentIdAllocator};
 
 /// Human-facing item label copied from a definition at spawn time.

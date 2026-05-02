@@ -8,7 +8,7 @@ use crate::data::items::{
     init_item_definitions, spawn_item, ItemDefinitions, ItemPersistence, ItemSpawnContext,
 };
 use crate::energy::ActionEnergy;
-use crate::ids::ItemDefinitionId;
+use crate::infra::ids::ItemDefinitionId;
 use crate::input::KeyBindings;
 use crate::map::{Map, TileCoord};
 use crate::persistence::{PersistentId, PersistentIdAllocator};

@@ -9,7 +9,7 @@ use cargo_stranding_again::{
         run_scenario, ExpectationFailure, HeadlessCommand, HeadlessGame, HeadlessScenario,
         HeadlessScenarioError, HeadlessScenarioReport, HeadlessSnapshot,
     },
-    logging,
+    infra::logging,
 };
 
 const DEFAULT_SCENARIO_DIR: &str = "scenarios/headless";

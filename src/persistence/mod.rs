@@ -16,7 +16,7 @@ mod slot;
 mod storage;
 mod timeline;
 
-pub use crate::ids::ItemDefinitionId;
+pub use crate::infra::ids::ItemDefinitionId;
 pub use cargo::{
     SavedCargoItem, SavedCargoLocation, SavedCargoStats, SavedCarrySlot, SavedContainerState,
     SavedParcelState,
