@@ -1,20 +1,14 @@
 # AGENTS.md
 
-This is a small Rust game using Macroquad for the window/input/render loop and
-standalone Bevy ECS for deterministic simulation state.
-
-Look at glossary.md too. It's where I distinguish between things like 'cargo' and 'parcel'.
+This is a Rust game using Macroquad for the window/input/render loop and standalone Bevy ECS for simulation state.
 
 Use your github MCP tools to access tickets; there is no github CLI installed locally.
 
 ## Verification
 
-Verify your work with this command:
+Verify your work with `cargo run --bin xtask -- verify`.
 
-- `cargo run --bin xtask -- verify`
-
-That command runs `cargo fmt`, `cargo clippy --all-targets`, and
-`cargo test`. It also includes the headless scenario commands explained later.
+That command runs `cargo fmt`, `cargo clippy --all-targets`, and `cargo test`. It also includes the headless scenario commands explained later.
 
 You shouldn't need to run `cargo fmt` yourself manually because of this; just let the xtask handle it unless something crops up.
 
