@@ -14,7 +14,7 @@ use crate::resources::{
     SimulationClock,
 };
 use crate::simulation::SimulationRunner;
-use crate::world_setup::init_world;
+use crate::world_setup::init_game_world;
 
 pub struct HeadlessGame {
     world: World,
@@ -24,7 +24,7 @@ pub struct HeadlessGame {
 impl HeadlessGame {
     pub fn new() -> Self {
         let mut world = World::new();
-        init_world(&mut world);
+        init_game_world(&mut world);
 
         let simulation = SimulationRunner::new();
 

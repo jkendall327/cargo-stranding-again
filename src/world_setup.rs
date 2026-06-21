@@ -43,6 +43,16 @@ pub fn init_world(world: &mut World) {
     );
 }
 
+/// Initializes a fresh playable world and registers the schedules that drive it.
+///
+/// Windowed, headless, and integration-style tests should prefer this helper
+/// when they need a complete runtime world. Lower-level tests can still call
+/// `init_world` or `init_resources` when they intentionally own scheduling.
+pub fn init_game_world(world: &mut World) {
+    init_world(world);
+    crate::schedules::ensure_simulation_schedules(world);
+}
+
 /// Inserts the non-entity resources needed by the windowed and headless game.
 ///
 /// Save loading uses this with a restored map before spawning saved entities,

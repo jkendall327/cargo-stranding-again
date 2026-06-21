@@ -8,7 +8,9 @@ use super::{
     CharacterLoadError, CharacterSaveError, Save, SaveDirectoryError, SaveKind, WorldId,
     WorldLoadError, WorldSaveError,
 };
-use crate::{cargo::Item, components::Actor, map::Map, world_setup};
+use crate::{
+    cargo::Item, components::Actor, map::Map, schedules::ensure_simulation_schedules, world_setup,
+};
 
 /// Stable IDs that choose the world and character roots for one save slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +93,7 @@ pub fn load_save_slot(
     )
     .map_err(SaveSlotError::WorldLoad)?;
     world_setup::reserve_existing_persistent_ids(&mut world);
+    ensure_simulation_schedules(&mut world);
 
     Ok(LoadedSaveSlot {
         ids: SaveSlotIds {
@@ -132,6 +135,7 @@ pub fn load_save_slot_into_world(
     super::runtime::spawn_saved_world_data_with_entities(world, &world_save.payload, &entity_by_id)
         .map_err(SaveSlotError::WorldLoad)?;
     world_setup::reserve_existing_persistent_ids(world);
+    ensure_simulation_schedules(world);
 
     Ok(SaveSlotIds {
         world_id: world_save.payload.world_id,

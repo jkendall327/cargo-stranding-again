@@ -2,37 +2,34 @@ use bevy_ecs::prelude::*;
 
 use crate::components::{Player, Position};
 use crate::map::{Map, TileCoord};
-use crate::schedules;
+use crate::schedules::{ensure_simulation_schedules, PlayerActionPhase};
 use crate::systems::timeline;
 
-pub struct SimulationRunner {
-    player_action: Schedule,
-    autonomous_actors: Schedule,
-}
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct SimulationRunner {}
 
 impl SimulationRunner {
     pub fn new() -> Self {
-        Self {
-            player_action: schedules::player_action_phase_schedule(),
-            autonomous_actors: schedules::autonomous_actor_phase_schedule(),
-        }
+        Self {}
     }
 
     pub fn run_player_intent(&mut self, world: &mut World) {
+        ensure_simulation_schedules(world);
         if !timeline::has_player_intent(world) {
             return;
         }
 
-        timeline::advance_to_player_ready(world, &mut self.autonomous_actors);
+        timeline::advance_to_player_ready(world);
         stream_chunks_around_player(world);
-        self.player_action.run(world);
+        world.run_schedule(PlayerActionPhase);
         stream_chunks_around_player(world);
         self.advance_after_player_action_if_spent(world);
     }
 
     pub fn advance_after_player_action_if_spent(&mut self, world: &mut World) {
+        ensure_simulation_schedules(world);
         if timeline::player_spent_action_energy(world) {
-            timeline::advance_after_player_action_spent(world, &mut self.autonomous_actors);
+            timeline::advance_after_player_action_spent(world);
         }
     }
 }
@@ -49,10 +46,4 @@ fn stream_chunks_around_player(world: &mut World) {
     world
         .resource_mut::<Map>()
         .stream_chunks_near(TileCoord::from(player_position));
-}
-
-impl Default for SimulationRunner {
-    fn default() -> Self {
-        Self::new()
-    }
 }

@@ -4,17 +4,18 @@ use crate::components::{AutonomousActor, Player, WantsAction};
 use crate::energy::ActionEnergy;
 use crate::map::Map;
 use crate::resources::{EnergyTimeline, PlayerIntent, SimulationClock};
+use crate::schedules::AutonomousActorPhase;
 
 pub(crate) fn has_player_intent(world: &World) -> bool {
     world.resource::<PlayerIntent>().action.is_some()
 }
 
-pub(crate) fn advance_to_player_ready(world: &mut World, autonomous_schedule: &mut Schedule) {
+pub(crate) fn advance_to_player_ready(world: &mut World) {
     if let Some(player_ready_at) = player_ready_at(world) {
         let now = world.resource::<EnergyTimeline>().now;
         if player_ready_at > now {
             if world.contains_resource::<Map>() {
-                catch_up_autonomous_actors_until(world, autonomous_schedule, player_ready_at);
+                catch_up_autonomous_actors_until(world, player_ready_at);
             } else {
                 world.resource_mut::<EnergyTimeline>().now = player_ready_at;
             }
@@ -22,14 +23,11 @@ pub(crate) fn advance_to_player_ready(world: &mut World, autonomous_schedule: &m
     }
 }
 
-pub(crate) fn advance_after_player_action_spent(
-    world: &mut World,
-    autonomous_schedule: &mut Schedule,
-) {
+pub(crate) fn advance_after_player_action_spent(world: &mut World) {
     world.resource_mut::<SimulationClock>().turn += 1;
     if let Some(player_ready_at) = player_ready_at(world) {
         if world.contains_resource::<Map>() {
-            catch_up_autonomous_actors_until(world, autonomous_schedule, player_ready_at);
+            catch_up_autonomous_actors_until(world, player_ready_at);
         } else {
             world.resource_mut::<EnergyTimeline>().now = player_ready_at;
         }
@@ -50,17 +48,13 @@ pub(crate) fn player_ready_at(world: &mut World) -> Option<u64> {
     query.iter(world).next().map(|energy| energy.ready_at)
 }
 
-fn catch_up_autonomous_actors_until(
-    world: &mut World,
-    autonomous_schedule: &mut Schedule,
-    until_time: u64,
-) {
-    autonomous_schedule.run(world);
+fn catch_up_autonomous_actors_until(world: &mut World, until_time: u64) {
+    world.run_schedule(AutonomousActorPhase);
 
     while let Some(next_ready_at) = next_ready_autonomous_actor_time(world, until_time) {
         world.resource_mut::<EnergyTimeline>().now = next_ready_at;
         let before = ready_autonomous_actor_progress_marker(world);
-        autonomous_schedule.run(world);
+        world.run_schedule(AutonomousActorPhase);
         let after = ready_autonomous_actor_progress_marker(world);
 
         if after == before {

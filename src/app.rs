@@ -11,44 +11,14 @@ use crate::render::{self, initial_window_height, initial_window_width};
 use crate::resources::{
     GameScreen, PersistenceAction, PersistenceIntent, PersistenceStatus, PlayerIntent,
 };
+use crate::schedules::{ensure_simulation_schedules, MenuPhase};
 use crate::simulation::SimulationRunner;
-use crate::world_setup::init_world;
+use crate::world_setup::init_game_world;
 
 const DEBUG_SAVE_IDS: SaveSlotIds = SaveSlotIds {
     world_id: WorldId(1),
     character_id: CharacterId(1),
 };
-
-/// Windowed-only schedule state for simulation phases that can loop within one frame.
-///
-/// The simulation entities and resources live directly in Bevy's app world.
-/// This resource only keeps the reusable schedules that need to be driven from
-/// an exclusive system.
-#[derive(Resource)]
-pub struct GameSchedules {
-    simulation: SimulationRunner,
-    menu_schedule: bevy_ecs::prelude::Schedule,
-}
-
-impl Default for GameSchedules {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GameSchedules {
-    pub fn new() -> Self {
-        let menu_schedule = crate::schedules::menu_schedule();
-        let simulation = SimulationRunner::new();
-
-        tracing::debug!("created game schedules");
-
-        Self {
-            simulation,
-            menu_schedule,
-        }
-    }
-}
 
 pub fn run() {
     let mut app = App::new();
@@ -62,9 +32,9 @@ pub fn run() {
             ..Default::default()
         }));
 
-    init_world(app.world_mut());
+    init_game_world(app.world_mut());
 
-    app.insert_resource(GameSchedules::new())
+    app.insert_resource(SimulationRunner::new())
         .init_resource::<render::MenuUiFingerprint>()
         .add_systems(
             Startup,
@@ -96,19 +66,18 @@ fn tick_game(world: &mut World) {
     // compact input intent into the same ECS world as the simulation.
     crate::input::copy_to_ecs(world, &keyboard, now_seconds);
 
-    world.resource_scope(|world, mut schedules: Mut<GameSchedules>| {
-        schedules.menu_schedule.run(world);
-        handle_persistence_intent(world, &mut schedules);
-        schedules
-            .simulation
-            .advance_after_player_action_if_spent(world);
+    ensure_simulation_schedules(world);
+    world.run_schedule(MenuPhase);
+    handle_persistence_intent(world);
 
+    world.resource_scope(|world, mut simulation: Mut<SimulationRunner>| {
+        simulation.advance_after_player_action_if_spent(world);
         // The energy timeline stays input-paced for now: player input advances
         // time, and NPCs catch up to the player's next ready moment.
         if world.resource::<GameScreen>().allows_simulation()
             && world.resource::<PlayerIntent>().has_action()
         {
-            schedules.simulation.run_player_intent(world);
+            simulation.run_player_intent(world);
         }
     });
 }
@@ -117,7 +86,7 @@ fn debug_save_path() -> PathBuf {
     PathBuf::from("saves").join("debug-slot")
 }
 
-fn handle_persistence_intent(world: &mut World, schedules: &mut GameSchedules) {
+fn handle_persistence_intent(world: &mut World) {
     let action = {
         let mut intent = world.resource_mut::<PersistenceIntent>();
         intent.action.take()
@@ -125,7 +94,7 @@ fn handle_persistence_intent(world: &mut World, schedules: &mut GameSchedules) {
 
     match action {
         Some(PersistenceAction::SaveDebugSlot) => save_debug_slot(world),
-        Some(PersistenceAction::LoadDebugSlot) => load_debug_slot(world, schedules),
+        Some(PersistenceAction::LoadDebugSlot) => load_debug_slot(world),
         None => {}
     }
 }
@@ -148,13 +117,12 @@ fn save_debug_slot(world: &mut World) {
     }
 }
 
-fn load_debug_slot(world: &mut World, schedules: &mut GameSchedules) {
+fn load_debug_slot(world: &mut World) {
     let path = debug_save_path();
     match load_save_slot_into_world(&path, DEBUG_SAVE_IDS.character_id, world) {
         Ok(_) => {
             *world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
-            schedules.simulation = SimulationRunner::new();
-            schedules.menu_schedule = crate::schedules::menu_schedule();
+            ensure_simulation_schedules(world);
             set_persistence_status(world, format!("Loaded debug slot from {}", path.display()));
         }
         Err(error) => set_persistence_status(world, format!("Load failed: {error:?}")),
@@ -186,17 +154,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schedules_rebuild_after_loading_debug_slot() {
+    fn simulation_schedules_can_run_after_reinitializing_resources() {
         let mut world = World::new();
-        init_world(&mut world);
-        let mut schedules = GameSchedules::new();
-        schedules.menu_schedule.run(&mut world);
-
-        schedules.simulation = SimulationRunner::new();
-        schedules.menu_schedule = crate::schedules::menu_schedule();
+        init_game_world(&mut world);
+        world.run_schedule(MenuPhase);
 
         *world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
-        schedules.menu_schedule.run(&mut world);
+        ensure_simulation_schedules(&mut world);
+        world.run_schedule(MenuPhase);
 
         assert_eq!(*world.resource::<GameScreen>(), GameScreen::PauseMenu);
     }
