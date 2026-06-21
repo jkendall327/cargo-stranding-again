@@ -31,6 +31,13 @@ type PlayerActionItem<'a> = (
 );
 
 type PlayerPickupItem<'a> = (Entity, &'a Position, Option<&'a ParcelDelivery>);
+type PlayerPickupActor<'a> = (
+    Entity,
+    &'a Position,
+    &'a mut Velocity,
+    &'a ActionEnergy,
+    Option<&'a CarriedItems>,
+);
 type PlayerPickupFilter = (
     With<Item>,
     With<CargoStats>,
@@ -84,16 +91,7 @@ fn carried_item_count(
 pub fn pick_up_player_item_from_intent(
     intent: Res<PlayerIntent>,
     timeline: Res<EnergyTimeline>,
-    player: Single<
-        (
-            Entity,
-            &Position,
-            &mut Velocity,
-            &ActionEnergy,
-            Option<&CarriedItems>,
-        ),
-        With<Player>,
-    >,
+    player: Single<PlayerPickupActor, With<Player>>,
     items: Query<PlayerPickupItem, PlayerPickupFilter>,
     containers: Query<(), With<Container>>,
     mut pickup_requests: MessageWriter<PickUpRequest>,
@@ -102,8 +100,7 @@ pub fn pick_up_player_item_from_intent(
         return;
     };
 
-    let (player_entity, player_position, mut velocity, energy, carried_items) =
-        player.into_inner();
+    let (player_entity, player_position, mut velocity, energy, carried_items) = player.into_inner();
     if !energy.is_ready(timeline.now) {
         return;
     }
