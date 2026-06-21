@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy_ecs::prelude::{ChildSpawner, With};
 
@@ -39,8 +41,61 @@ const LEGEND_LINES: [&str; 5] = [
     "Small badges: carried cargo",
 ];
 
+const CAMERA_TILE_COUNT: usize =
+    (DEFAULT_CAMERA_TILE_SPAN as usize) * (DEFAULT_CAMERA_TILE_SPAN as usize);
+
 #[derive(Component)]
-pub(crate) struct RenderedFrameEntity;
+struct ViewportBackground;
+
+#[derive(Component, Clone, Copy)]
+struct ViewportFrameSegment {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+#[derive(Component, Clone, Copy)]
+struct MapTileSprite {
+    offset_x: i32,
+    offset_y: i32,
+}
+
+#[derive(Component, Clone, Copy)]
+struct MapTileElevationText {
+    offset_x: i32,
+    offset_y: i32,
+}
+
+#[derive(Component, Clone, Copy)]
+struct MapTileAuxText {
+    offset_x: i32,
+    offset_y: i32,
+}
+
+#[derive(Component, Clone, Copy, Debug, Hash, PartialEq, Eq)]
+enum SceneRenderKey {
+    LooseCargoBox(Entity),
+    LooseCargoOutline(Entity),
+    LooseCargoWeight(Entity),
+    LooseCargoLabel(Entity),
+    PorterBody(Entity),
+    PorterOutline(Entity),
+    PorterId(Entity),
+    PorterPhase(Entity),
+    PlayerBody,
+    PlayerGlyph,
+    PlayerStaminaBackground,
+    PlayerStaminaFill,
+    CargoBadgeBackground(Entity),
+    CargoBadgeFill(Entity),
+    CargoBadgeText(Entity),
+}
+
+#[derive(Component)]
+struct SceneRenderPart {
+    key: SceneRenderKey,
+}
 
 #[derive(Component)]
 pub(crate) struct HudRoot;
@@ -93,27 +148,25 @@ pub(crate) fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
-pub(crate) fn sync_render(world: &mut World) {
-    let rendered = {
-        let mut query = world.query_filtered::<Entity, With<RenderedFrameEntity>>();
-        query.iter(world).collect::<Vec<_>>()
-    };
-    for entity in rendered {
-        world.entity_mut(entity).despawn();
-    }
+pub(crate) fn spawn_scene_view(world: &mut World) {
+    spawn_viewport_chrome(world);
+    spawn_map_tile_pool(world);
+}
 
+pub(crate) fn sync_rendered_scene(world: &mut World) {
     update_camera(world);
     let camera = *world.resource::<Camera>();
 
-    draw_viewport_background(world, camera);
-    draw_map(world, camera);
+    sync_viewport_chrome(world, camera);
+    sync_map_tiles(world, camera);
 
     let loose_cargo = LooseCargoRender::all_from_world(world);
     let actor_cargo = ActorCargoRender::all_from_world(world);
-    draw_loose_cargo(world, &loose_cargo, camera);
-    draw_porters(world, camera, &actor_cargo);
-    draw_player(world, camera, &actor_cargo);
-    draw_viewport_frame(world, camera);
+    let mut live_parts = HashSet::new();
+    sync_loose_cargo(world, &loose_cargo, camera, &mut live_parts);
+    sync_porters(world, camera, &actor_cargo, &mut live_parts);
+    sync_player(world, camera, &actor_cargo, &mut live_parts);
+    despawn_stale_scene_parts(world, &live_parts);
 }
 
 fn update_camera(world: &mut World) {
@@ -132,98 +185,6 @@ fn update_camera(world: &mut World) {
     world
         .resource_mut::<Camera>()
         .center_on(player_position, bounds);
-}
-
-fn draw_viewport_background(world: &mut World, camera: Camera) {
-    spawn_rect(
-        world,
-        VIEWPORT_X - 4.0,
-        VIEWPORT_Y - 4.0,
-        viewport_width(camera) + 8.0,
-        viewport_height(camera) + 8.0,
-        0.0,
-        color_rgba(8, 10, 12, 255),
-    );
-}
-
-fn draw_viewport_frame(world: &mut World, camera: Camera) {
-    draw_rect_outline(
-        world,
-        VIEWPORT_X - 1.0,
-        VIEWPORT_Y - 1.0,
-        viewport_width(camera) + 2.0,
-        viewport_height(camera) + 2.0,
-        2.0,
-        color_rgba(215, 220, 226, 180),
-    );
-}
-
-fn draw_map(world: &mut World, camera: Camera) {
-    let visible_tiles = {
-        let map = world.resource::<Map>();
-        map.visible_tiles(camera.origin_coord(), camera.width, camera.height)
-            .map(|coord| {
-                let tile = map
-                    .tile_at_coord(coord)
-                    .expect("visible tile iteration is in bounds");
-                (coord, tile)
-            })
-            .collect::<Vec<_>>()
-    };
-
-    for (coord, tile) in visible_tiles {
-        let (px, py) = tile_to_screen(camera, coord);
-        spawn_rect(
-            world,
-            px,
-            py,
-            TILE_SIZE,
-            TILE_SIZE,
-            1.0,
-            terrain_color(tile.terrain, tile.elevation, tile.water_depth),
-        );
-        draw_rect_outline(
-            world,
-            px,
-            py,
-            TILE_SIZE,
-            TILE_SIZE,
-            1.0,
-            color_rgba(0, 0, 0, 45),
-        );
-
-        spawn_text(
-            world,
-            &tile.elevation.to_string(),
-            px + 1.5,
-            py + 7.0,
-            8.0,
-            5.0,
-            color_rgba(245, 245, 235, 175),
-        );
-
-        if tile.water_depth > 0 {
-            spawn_text(
-                world,
-                &tile.water_depth.to_string(),
-                px + 10.0,
-                py + 14.0,
-                8.0,
-                5.0,
-                color_rgba(210, 235, 255, 210),
-            );
-        } else if matches!(tile.terrain.glyph(), 'D' | '^') {
-            spawn_text(
-                world,
-                &tile.terrain.glyph().to_string(),
-                px + 4.0,
-                py + 12.5,
-                14.0,
-                5.0,
-                color_rgba(18, 18, 18, 200),
-            );
-        }
-    }
 }
 
 fn terrain_color(terrain: Terrain, elevation: i16, water_depth: u8) -> Color {
@@ -251,7 +212,286 @@ fn shade_color(color: Color, amount: f32) -> Color {
     )
 }
 
-fn draw_loose_cargo(world: &mut World, cargo: &[LooseCargoRender], camera: Camera) {
+fn spawn_viewport_chrome(world: &mut World) {
+    world.spawn((
+        ViewportBackground,
+        Sprite::default(),
+        Transform::default(),
+        Visibility::default(),
+    ));
+    for segment in viewport_frame_segments(Camera::default()) {
+        world.spawn((
+            segment,
+            Sprite::default(),
+            Transform::default(),
+            Visibility::default(),
+        ));
+    }
+}
+
+fn sync_viewport_chrome(world: &mut World, camera: Camera) {
+    let background = {
+        let mut query = world.query_filtered::<Entity, With<ViewportBackground>>();
+        query.iter(world).next()
+    };
+    if let Some(entity) = background {
+        set_sprite(
+            world,
+            entity,
+            SpriteRender {
+                x: VIEWPORT_X - 4.0,
+                y: VIEWPORT_Y - 4.0,
+                width: viewport_width(camera) + 8.0,
+                height: viewport_height(camera) + 8.0,
+                z: 0.0,
+                color: color_rgba(8, 10, 12, 255),
+                visible: true,
+            },
+        );
+    }
+
+    for segment in viewport_frame_segments(camera) {
+        let entity = {
+            let mut query = world.query::<(Entity, &ViewportFrameSegment)>();
+            query
+                .iter(world)
+                .find(|(_, existing)| {
+                    existing.x == segment.x
+                        && existing.y == segment.y
+                        && existing.width == segment.width
+                        && existing.height == segment.height
+                })
+                .map(|(entity, _)| entity)
+        };
+        if let Some(entity) = entity {
+            set_sprite(
+                world,
+                entity,
+                SpriteRender {
+                    x: segment.x,
+                    y: segment.y,
+                    width: segment.width,
+                    height: segment.height,
+                    z: 50.0,
+                    color: color_rgba(215, 220, 226, 180),
+                    visible: true,
+                },
+            );
+        }
+    }
+}
+
+fn viewport_frame_segments(camera: Camera) -> [ViewportFrameSegment; 4] {
+    let x = VIEWPORT_X - 1.0;
+    let y = VIEWPORT_Y - 1.0;
+    let width = viewport_width(camera) + 2.0;
+    let height = viewport_height(camera) + 2.0;
+    let thickness = 2.0;
+    [
+        ViewportFrameSegment {
+            x,
+            y,
+            width,
+            height: thickness,
+        },
+        ViewportFrameSegment {
+            x,
+            y: y + height - thickness,
+            width,
+            height: thickness,
+        },
+        ViewportFrameSegment {
+            x,
+            y,
+            width: thickness,
+            height,
+        },
+        ViewportFrameSegment {
+            x: x + width - thickness,
+            y,
+            width: thickness,
+            height,
+        },
+    ]
+}
+
+fn spawn_map_tile_pool(world: &mut World) {
+    debug_assert_eq!(
+        CAMERA_TILE_COUNT,
+        (DEFAULT_CAMERA_TILE_SPAN * DEFAULT_CAMERA_TILE_SPAN) as usize
+    );
+    for offset_y in 0..DEFAULT_CAMERA_TILE_SPAN {
+        for offset_x in 0..DEFAULT_CAMERA_TILE_SPAN {
+            world.spawn((
+                MapTileSprite { offset_x, offset_y },
+                Sprite::default(),
+                Transform::default(),
+                Visibility::default(),
+            ));
+            world.spawn((
+                MapTileElevationText { offset_x, offset_y },
+                Text2d::new(""),
+                TextFont {
+                    font_size: FontSize::Px(8.0),
+                    ..Default::default()
+                },
+                TextColor(color_rgba(245, 245, 235, 175)),
+                Transform::default(),
+                Visibility::default(),
+            ));
+            world.spawn((
+                MapTileAuxText { offset_x, offset_y },
+                Text2d::new(""),
+                TextFont {
+                    font_size: FontSize::Px(8.0),
+                    ..Default::default()
+                },
+                TextColor(color_rgba(210, 235, 255, 210)),
+                Transform::default(),
+                Visibility::default(),
+            ));
+        }
+    }
+}
+
+fn sync_map_tiles(world: &mut World, camera: Camera) {
+    let tile_updates = {
+        let map = world.resource::<Map>();
+        let mut updates = Vec::with_capacity(CAMERA_TILE_COUNT);
+        for offset_y in 0..camera.height {
+            for offset_x in 0..camera.width {
+                let coord = TileCoord::new(camera.x + offset_x, camera.y + offset_y);
+                updates.push((offset_x, offset_y, coord, map.tile_at_coord(coord)));
+            }
+        }
+        updates
+    };
+
+    let sprites = {
+        let mut query = world.query::<(Entity, &MapTileSprite)>();
+        query
+            .iter(world)
+            .map(|(entity, tile)| (entity, tile.offset_x, tile.offset_y))
+            .collect::<Vec<_>>()
+    };
+    let elevation_text = {
+        let mut query = world.query::<(Entity, &MapTileElevationText)>();
+        query
+            .iter(world)
+            .map(|(entity, tile)| (entity, tile.offset_x, tile.offset_y))
+            .collect::<Vec<_>>()
+    };
+    let aux_text = {
+        let mut query = world.query::<(Entity, &MapTileAuxText)>();
+        query
+            .iter(world)
+            .map(|(entity, tile)| (entity, tile.offset_x, tile.offset_y))
+            .collect::<Vec<_>>()
+    };
+
+    for (entity, offset_x, offset_y) in sprites {
+        let Some((_, _, coord, tile)) = tile_updates
+            .iter()
+            .find(|(x, y, _, _)| *x == offset_x && *y == offset_y)
+        else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let Some(tile) = tile else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let (px, py) = tile_to_screen(camera, *coord);
+        set_sprite(
+            world,
+            entity,
+            SpriteRender {
+                x: px,
+                y: py,
+                width: TILE_SIZE,
+                height: TILE_SIZE,
+                z: 1.0,
+                color: terrain_color(tile.terrain, tile.elevation, tile.water_depth),
+                visible: true,
+            },
+        );
+    }
+
+    for (entity, offset_x, offset_y) in elevation_text {
+        let Some((_, _, coord, Some(tile))) = tile_updates
+            .iter()
+            .find(|(x, y, _, _)| *x == offset_x && *y == offset_y)
+        else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let (px, py) = tile_to_screen(camera, *coord);
+        set_text(
+            world,
+            entity,
+            TextRender {
+                text: tile.elevation.to_string(),
+                x: px + 1.5,
+                y: py + 7.0,
+                z: 5.0,
+                color: color_rgba(245, 245, 235, 175),
+                font_size: 8.0,
+                visible: true,
+            },
+        );
+    }
+
+    for (entity, offset_x, offset_y) in aux_text {
+        let Some((_, _, coord, Some(tile))) = tile_updates
+            .iter()
+            .find(|(x, y, _, _)| *x == offset_x && *y == offset_y)
+        else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let (text, x, y, font_size, color) = if tile.water_depth > 0 {
+            (
+                tile.water_depth.to_string(),
+                10.0,
+                14.0,
+                8.0,
+                color_rgba(210, 235, 255, 210),
+            )
+        } else if matches!(tile.terrain.glyph(), 'D' | '^') {
+            (
+                tile.terrain.glyph().to_string(),
+                4.0,
+                12.5,
+                14.0,
+                color_rgba(18, 18, 18, 200),
+            )
+        } else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let (px, py) = tile_to_screen(camera, *coord);
+        set_text(
+            world,
+            entity,
+            TextRender {
+                text,
+                x: px + x,
+                y: py + y,
+                z: 5.0,
+                color,
+                font_size,
+                visible: true,
+            },
+        );
+    }
+}
+
+fn sync_loose_cargo(
+    world: &mut World,
+    cargo: &[LooseCargoRender],
+    camera: Camera,
+    live_parts: &mut HashSet<SceneRenderKey>,
+) {
     for item in cargo {
         if !camera.contains(item.position) {
             continue;
@@ -267,26 +507,75 @@ fn draw_loose_cargo(world: &mut World, cargo: &[LooseCargoRender], camera: Camer
                 porter_id.map(|id| format!("P{id}")),
             ),
         };
-        spawn_rect(world, cx - 5.0, cy - 5.0, 10.0, 10.0, 10.0, color);
-        if let Some(outline) = outline {
-            draw_rect_outline(world, cx - 6.5, cy - 6.5, 13.0, 13.0, 2.0, outline);
-        }
-        spawn_text(
+        set_keyed_sprite(
             world,
-            &format!("{:.0}", item.weight),
-            cx - 4.0,
-            cy + 4.0,
-            10.0,
-            12.0,
-            Color::BLACK,
+            SceneRenderKey::LooseCargoBox(item.entity),
+            live_parts,
+            SpriteRender {
+                x: cx - 5.0,
+                y: cy - 5.0,
+                width: 10.0,
+                height: 10.0,
+                z: 10.0,
+                color,
+                visible: true,
+            },
+        );
+        if let Some(outline) = outline {
+            set_keyed_sprite(
+                world,
+                SceneRenderKey::LooseCargoOutline(item.entity),
+                live_parts,
+                SpriteRender {
+                    x: cx - 6.5,
+                    y: cy - 6.5,
+                    width: 13.0,
+                    height: 13.0,
+                    z: 11.0,
+                    color: outline,
+                    visible: true,
+                },
+            );
+        }
+        set_keyed_text(
+            world,
+            SceneRenderKey::LooseCargoWeight(item.entity),
+            live_parts,
+            TextRender {
+                text: format!("{:.0}", item.weight),
+                x: cx - 4.0,
+                y: cy + 4.0,
+                z: 12.0,
+                color: Color::BLACK,
+                font_size: 10.0,
+                visible: true,
+            },
         );
         if let Some(label) = label {
-            spawn_text(world, &label, px + 1.0, py - 1.0, 10.0, 12.0, Color::WHITE);
+            set_keyed_text(
+                world,
+                SceneRenderKey::LooseCargoLabel(item.entity),
+                live_parts,
+                TextRender {
+                    text: label,
+                    x: px + 1.0,
+                    y: py - 1.0,
+                    z: 12.0,
+                    color: Color::WHITE,
+                    font_size: 10.0,
+                    visible: true,
+                },
+            );
         }
     }
 }
 
-fn draw_porters(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRender]) {
+fn sync_porters(
+    world: &mut World,
+    camera: Camera,
+    actor_cargo: &[ActorCargoRender],
+    live_parts: &mut HashSet<SceneRenderKey>,
+) {
     let mut query = world.query::<(bevy_ecs::prelude::Entity, &Position, &Porter, &AssignedJob)>();
     let porters = query
         .iter(world)
@@ -306,16 +595,47 @@ fn draw_porters(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRend
         } else {
             color_rgba(80, 210, 170, 255)
         };
-        spawn_rect(world, px + 3.0, py + 3.0, 10.0, 10.0, 15.0, color);
-        draw_rect_outline(world, px + 2.0, py + 2.0, 12.0, 12.0, 1.5, Color::WHITE);
-        spawn_text(
+        set_keyed_sprite(
             world,
-            &format!("P{porter_id}"),
-            px + 1.0,
-            py + 13.0,
-            12.0,
-            16.0,
-            Color::BLACK,
+            SceneRenderKey::PorterBody(entity),
+            live_parts,
+            SpriteRender {
+                x: px + 3.0,
+                y: py + 3.0,
+                width: 10.0,
+                height: 10.0,
+                z: 15.0,
+                color,
+                visible: true,
+            },
+        );
+        set_keyed_sprite(
+            world,
+            SceneRenderKey::PorterOutline(entity),
+            live_parts,
+            SpriteRender {
+                x: px + 2.0,
+                y: py + 2.0,
+                width: 12.0,
+                height: 12.0,
+                z: 16.0,
+                color: Color::WHITE,
+                visible: true,
+            },
+        );
+        set_keyed_text(
+            world,
+            SceneRenderKey::PorterId(entity),
+            live_parts,
+            TextRender {
+                text: format!("P{porter_id}"),
+                x: px + 1.0,
+                y: py + 13.0,
+                z: 16.0,
+                color: Color::BLACK,
+                font_size: 12.0,
+                visible: true,
+            },
         );
 
         let label = match phase {
@@ -324,14 +644,32 @@ fn draw_porters(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRend
             JobPhase::GoToDepot => "D",
             JobPhase::Done => "!",
         };
-        spawn_text(world, label, px + 10.0, py + 7.0, 10.0, 16.0, Color::WHITE);
+        set_keyed_text(
+            world,
+            SceneRenderKey::PorterPhase(entity),
+            live_parts,
+            TextRender {
+                text: label.to_owned(),
+                x: px + 10.0,
+                y: py + 7.0,
+                z: 16.0,
+                color: Color::WHITE,
+                font_size: 10.0,
+                visible: true,
+            },
+        );
         if let Some(cargo) = carried {
-            draw_actor_cargo_badge(world, px, py, cargo);
+            sync_actor_cargo_badge(world, px, py, cargo, live_parts);
         }
     }
 }
 
-fn draw_player(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRender]) {
+fn sync_player(
+    world: &mut World,
+    camera: Camera,
+    actor_cargo: &[ActorCargoRender],
+    live_parts: &mut HashSet<SceneRenderKey>,
+) {
     let player = {
         let mut query = world.query_filtered::<(
             bevy_ecs::prelude::Entity,
@@ -360,43 +698,63 @@ fn draw_player(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRende
         crate::movement::MovementMode::Sprinting => color_rgba(250, 218, 108, 255),
         crate::movement::MovementMode::Steady => color_rgba(117, 205, 188, 255),
     };
-    spawn_rect(
+    set_keyed_sprite(
         world,
-        px + 2.0,
-        py + 2.0,
-        TILE_SIZE - 4.0,
-        TILE_SIZE - 4.0,
-        20.0,
-        player_color,
+        SceneRenderKey::PlayerBody,
+        live_parts,
+        SpriteRender {
+            x: px + 2.0,
+            y: py + 2.0,
+            width: TILE_SIZE - 4.0,
+            height: TILE_SIZE - 4.0,
+            z: 20.0,
+            color: player_color,
+            visible: true,
+        },
     );
-    spawn_text(
+    set_keyed_text(
         world,
-        "@",
-        px + 3.0,
-        py + 14.0,
-        18.0,
-        21.0,
-        color_rgba(30, 35, 45, 255),
+        SceneRenderKey::PlayerGlyph,
+        live_parts,
+        TextRender {
+            text: "@".to_owned(),
+            x: px + 3.0,
+            y: py + 14.0,
+            z: 21.0,
+            color: color_rgba(30, 35, 45, 255),
+            font_size: 18.0,
+            visible: true,
+        },
     );
 
     let stamina_ratio = stamina.current / stamina.max;
-    spawn_rect(
+    set_keyed_sprite(
         world,
-        px,
-        py - 4.0,
-        TILE_SIZE,
-        3.0,
-        22.0,
-        color_rgba(60, 20, 20, 255),
+        SceneRenderKey::PlayerStaminaBackground,
+        live_parts,
+        SpriteRender {
+            x: px,
+            y: py - 4.0,
+            width: TILE_SIZE,
+            height: 3.0,
+            z: 22.0,
+            color: color_rgba(60, 20, 20, 255),
+            visible: true,
+        },
     );
-    spawn_rect(
+    set_keyed_sprite(
         world,
-        px,
-        py - 4.0,
-        TILE_SIZE * stamina_ratio,
-        3.0,
-        23.0,
-        color_rgba(90, 220, 130, 255),
+        SceneRenderKey::PlayerStaminaFill,
+        live_parts,
+        SpriteRender {
+            x: px,
+            y: py - 4.0,
+            width: TILE_SIZE * stamina_ratio,
+            height: 3.0,
+            z: 23.0,
+            color: color_rgba(90, 220, 130, 255),
+            visible: true,
+        },
     );
 
     if let Some(cargo) = actor_cargo
@@ -404,11 +762,17 @@ fn draw_player(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRende
         .find(|cargo| cargo.holder == entity)
         .filter(|cargo| matches!(cargo.holder_kind, CargoHolderKind::Player))
     {
-        draw_actor_cargo_badge(world, px, py, cargo);
+        sync_actor_cargo_badge(world, px, py, cargo, live_parts);
     }
 }
 
-fn draw_actor_cargo_badge(world: &mut World, px: f32, py: f32, cargo: &ActorCargoRender) {
+fn sync_actor_cargo_badge(
+    world: &mut World,
+    px: f32,
+    py: f32,
+    cargo: &ActorCargoRender,
+    live_parts: &mut HashSet<SceneRenderKey>,
+) {
     let badge_color = if cargo.has_contained_items {
         color_rgba(116, 205, 239, 255)
     } else {
@@ -419,17 +783,48 @@ fn draw_actor_cargo_badge(world: &mut World, px: f32, py: f32, cargo: &ActorCarg
     } else {
         format!("{:.0}", cargo.total_weight)
     };
-    spawn_rect(
+    set_keyed_sprite(
         world,
-        px + 9.0,
-        py,
-        8.0,
-        8.0,
-        25.0,
-        color_rgba(12, 14, 16, 235),
+        SceneRenderKey::CargoBadgeBackground(cargo.holder),
+        live_parts,
+        SpriteRender {
+            x: px + 9.0,
+            y: py,
+            width: 8.0,
+            height: 8.0,
+            z: 25.0,
+            color: color_rgba(12, 14, 16, 235),
+            visible: true,
+        },
     );
-    spawn_rect(world, px + 10.0, py + 1.0, 6.0, 6.0, 26.0, badge_color);
-    spawn_text(world, &label, px + 10.0, py + 7.0, 8.0, 27.0, Color::BLACK);
+    set_keyed_sprite(
+        world,
+        SceneRenderKey::CargoBadgeFill(cargo.holder),
+        live_parts,
+        SpriteRender {
+            x: px + 10.0,
+            y: py + 1.0,
+            width: 6.0,
+            height: 6.0,
+            z: 26.0,
+            color: badge_color,
+            visible: true,
+        },
+    );
+    set_keyed_text(
+        world,
+        SceneRenderKey::CargoBadgeText(cargo.holder),
+        live_parts,
+        TextRender {
+            text: label,
+            x: px + 10.0,
+            y: py + 7.0,
+            z: 27.0,
+            color: Color::BLACK,
+            font_size: 8.0,
+            visible: true,
+        },
+    );
 }
 
 pub(crate) fn spawn_hud(world: &mut World) {
@@ -795,60 +1190,138 @@ fn spawn_ui_spacer(parent: &mut ChildSpawner, height: f32) {
     },));
 }
 
-fn draw_rect_outline(
-    world: &mut World,
+struct SpriteRender {
     x: f32,
     y: f32,
     width: f32,
     height: f32,
-    thickness: f32,
+    z: f32,
     color: Color,
+    visible: bool,
+}
+
+struct TextRender {
+    text: String,
+    x: f32,
+    y: f32,
+    z: f32,
+    color: Color,
+    font_size: f32,
+    visible: bool,
+}
+
+fn set_keyed_sprite(
+    world: &mut World,
+    key: SceneRenderKey,
+    live_parts: &mut HashSet<SceneRenderKey>,
+    render: SpriteRender,
 ) {
-    spawn_rect(world, x, y, width, thickness, 50.0, color);
-    spawn_rect(
-        world,
-        x,
-        y + height - thickness,
-        width,
-        thickness,
-        50.0,
-        color,
-    );
-    spawn_rect(world, x, y, thickness, height, 50.0, color);
-    spawn_rect(
-        world,
-        x + width - thickness,
-        y,
-        thickness,
-        height,
-        50.0,
-        color,
-    );
+    live_parts.insert(key);
+    let entity = ensure_scene_sprite(world, key);
+    set_sprite(world, entity, render);
 }
 
-fn spawn_rect(world: &mut World, x: f32, y: f32, width: f32, height: f32, z: f32, color: Color) {
-    world.spawn((
-        RenderedFrameEntity,
-        Sprite {
-            color,
-            custom_size: Some(Vec2::new(width, height)),
-            ..Default::default()
-        },
-        Transform::from_translation(screen_point_to_world(x + width / 2.0, y + height / 2.0, z)),
-    ));
+fn set_keyed_text(
+    world: &mut World,
+    key: SceneRenderKey,
+    live_parts: &mut HashSet<SceneRenderKey>,
+    render: TextRender,
+) {
+    live_parts.insert(key);
+    let entity = ensure_scene_text(world, key);
+    set_text(world, entity, render);
 }
 
-fn spawn_text(world: &mut World, text: &str, x: f32, y: f32, font_size: f32, z: f32, color: Color) {
-    world.spawn((
-        RenderedFrameEntity,
-        Text2d::new(text),
-        TextFont {
-            font_size: FontSize::Px(font_size),
-            ..Default::default()
-        },
-        TextColor(color),
-        Transform::from_translation(screen_point_to_world(x, y, z)),
-    ));
+fn ensure_scene_sprite(world: &mut World, key: SceneRenderKey) -> Entity {
+    if let Some(entity) = scene_part_entity(world, key) {
+        return entity;
+    }
+    world
+        .spawn((
+            SceneRenderPart { key },
+            Sprite::default(),
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .id()
+}
+
+fn ensure_scene_text(world: &mut World, key: SceneRenderKey) -> Entity {
+    if let Some(entity) = scene_part_entity(world, key) {
+        return entity;
+    }
+    world
+        .spawn((
+            SceneRenderPart { key },
+            Text2d::new(""),
+            TextFont::default(),
+            TextColor(Color::WHITE),
+            Transform::default(),
+            Visibility::default(),
+        ))
+        .id()
+}
+
+fn scene_part_entity(world: &mut World, key: SceneRenderKey) -> Option<Entity> {
+    let mut query = world.query::<(Entity, &SceneRenderPart)>();
+    query
+        .iter(world)
+        .find(|(_, part)| part.key == key)
+        .map(|(entity, _)| entity)
+}
+
+fn set_sprite(world: &mut World, entity: Entity, render: SpriteRender) {
+    if let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
+        sprite.color = render.color;
+        sprite.custom_size = Some(Vec2::new(render.width, render.height));
+    }
+    if let Some(mut transform) = world.get_mut::<Transform>(entity) {
+        transform.translation = screen_point_to_world(
+            render.x + render.width / 2.0,
+            render.y + render.height / 2.0,
+            render.z,
+        );
+    }
+    set_visibility(world, entity, render.visible);
+}
+
+fn set_text(world: &mut World, entity: Entity, render: TextRender) {
+    if let Some(mut text) = world.get_mut::<Text2d>(entity) {
+        text.0 = render.text;
+    }
+    if let Some(mut font) = world.get_mut::<TextFont>(entity) {
+        font.font_size = FontSize::Px(render.font_size);
+    }
+    if let Some(mut color) = world.get_mut::<TextColor>(entity) {
+        color.0 = render.color;
+    }
+    if let Some(mut transform) = world.get_mut::<Transform>(entity) {
+        transform.translation = screen_point_to_world(render.x, render.y, render.z);
+    }
+    set_visibility(world, entity, render.visible);
+}
+
+fn set_visibility(world: &mut World, entity: Entity, visible: bool) {
+    if let Some(mut visibility) = world.get_mut::<Visibility>(entity) {
+        *visibility = if visible {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+fn despawn_stale_scene_parts(world: &mut World, live_parts: &HashSet<SceneRenderKey>) {
+    let stale = {
+        let mut query = world.query::<(Entity, &SceneRenderPart)>();
+        query
+            .iter(world)
+            .filter_map(|(entity, part)| (!live_parts.contains(&part.key)).then_some(entity))
+            .collect::<Vec<_>>()
+    };
+    for entity in stale {
+        world.entity_mut(entity).despawn();
+    }
 }
 
 fn screen_point_to_world(x: f32, y: f32, z: f32) -> Vec3 {
@@ -864,19 +1337,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_sync_spawns_world_and_ui_entities() {
+    fn retained_render_systems_spawn_world_and_ui_entities() {
         let mut app = App::new();
         crate::world_setup::init_world(app.world_mut());
         app.init_resource::<MenuUiFingerprint>()
-            .add_systems(Startup, spawn_hud)
-            .add_systems(Update, (sync_render, update_hud, sync_menu_ui).chain());
+            .add_systems(Startup, (spawn_scene_view, spawn_hud).chain())
+            .add_systems(
+                Update,
+                (sync_rendered_scene, update_hud, sync_menu_ui).chain(),
+            );
 
         app.update();
 
-        let mut rendered = app
+        let mut scene_parts = app
             .world_mut()
-            .query_filtered::<Entity, With<RenderedFrameEntity>>();
-        let rendered_count = rendered.iter(app.world()).count();
+            .query_filtered::<Entity, With<SceneRenderPart>>();
+        let scene_part_count = scene_parts.iter(app.world()).count();
         let mut sprites = app.world_mut().query::<&Sprite>();
         let sprite_count = sprites.iter(app.world()).count();
         let mut nodes = app.world_mut().query::<&Node>();
@@ -884,7 +1360,7 @@ mod tests {
         let mut texts = app.world_mut().query::<&Text>();
         let text_count = texts.iter(app.world()).count();
 
-        assert!(rendered_count > 0);
+        assert!(scene_part_count > 0);
         assert!(sprite_count > 0, "world scene should spawn sprite entities");
         assert!(node_count > 0, "HUD should spawn Bevy UI nodes");
         assert!(text_count > 0, "HUD should spawn Bevy UI text");
