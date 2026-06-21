@@ -80,8 +80,7 @@ pub(crate) fn sync_render(
     draw_porters(&mut commands, game.world_mut(), camera, &actor_cargo);
     draw_player(&mut commands, game.world_mut(), camera, &actor_cargo);
     draw_viewport_frame(&mut commands, camera);
-    draw_hud(&mut commands, game.world_mut(), camera);
-    draw_game_state_overlay(&mut commands, game.world_mut());
+    draw_ui(&mut commands, game.world_mut(), camera);
 }
 
 fn update_camera(world: &mut SimWorld) {
@@ -422,336 +421,334 @@ fn draw_actor_cargo_badge(commands: &mut Commands, px: f32, py: f32, cargo: &Act
     );
 }
 
-fn draw_hud(commands: &mut Commands, world: &mut SimWorld, camera: Camera) {
+fn draw_ui(commands: &mut Commands, world: &mut SimWorld, camera: Camera) {
+    let screen = *world.resource::<GameScreen>();
+    let pause_menu = *world.resource::<PauseMenuState>();
+    let persistence_status = world.resource::<PersistenceStatus>().clone();
+    let inventory_entries = if screen == GameScreen::InventoryMenu {
+        InventoryEntry::all_from_world(world)
+    } else {
+        Vec::new()
+    };
+
+    commands
+        .spawn((
+            RenderedFrameEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                top: px(0),
+                width: percent(100),
+                height: percent(100),
+                ..Default::default()
+            },
+            GlobalZIndex(10),
+        ))
+        .with_children(|parent| {
+            draw_hud(parent, world, camera);
+            match screen {
+                GameScreen::Playing => {}
+                GameScreen::PauseMenu => {
+                    draw_pause_menu(parent, pause_menu, &persistence_status);
+                }
+                GameScreen::InventoryMenu => {
+                    draw_inventory_menu(parent, &inventory_entries);
+                }
+                GameScreen::OptionsMenu => {
+                    draw_options_menu(parent);
+                }
+            }
+        });
+}
+
+fn draw_hud(parent: &mut ChildSpawnerCommands, world: &mut SimWorld, camera: Camera) {
     let Some(hud) = PlayerHudSnapshot::from_world(world, camera) else {
         return;
     };
     let porter_rows = PorterDebugRow::all_from_world(world);
     let panel_x = ui_x(camera);
-    spawn_rect(
-        commands,
-        panel_x - 12.0,
-        0.0,
-        UI_PANEL_WIDTH + 24.0,
-        WINDOW_HEIGHT,
-        30.0,
-        color_rgba(24, 27, 31, 245),
-    );
 
-    let mut y = 34.0;
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        "Cargo Stranding Again",
-        26.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        "Bevy app + Bevy ECS simulation",
-        18.0,
-        Color::srgb(0.5, 0.5, 0.5),
-    );
-    y += 14.0;
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Turn: {}", hud.turn),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Energy time: {}", hud.timeline),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!(
-            "Camera: {},{} | {}x{}",
-            hud.camera.x, hud.camera.y, hud.camera.width, hud.camera.height
-        ),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Player: {}, {}", hud.position.x, hud.position.y),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!(
-            "Elevation: {} | water depth: {}",
-            hud.elevation, hud.water_depth
-        ),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Stamina: {:.1}/{:.1}", hud.stamina_current, hud.stamina_max),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Movement: {}", hud.movement_mode.label()),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!(
-            "Momentum: {:.1} {}",
-            hud.momentum_amount,
-            hud.momentum_direction
-                .map(|direction| direction.label())
-                .unwrap_or("none")
-        ),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Ready: {}", hud.ready_label),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Cargo: {:.1}/{:.1}", hud.cargo_current, hud.cargo_max),
-        18.0,
-        Color::WHITE,
-    );
-    hud_text(
-        commands,
-        panel_x,
-        &mut y,
-        &format!("Delivered parcels: {}", hud.delivered_parcels),
-        18.0,
-        Color::WHITE,
-    );
-    y += 18.0;
+    parent
+        .spawn((
+            RenderedFrameEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(panel_x - 12.0),
+                top: px(0),
+                width: px(UI_PANEL_WIDTH + 24.0),
+                height: percent(100),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexStart,
+                padding: UiRect::new(px(12), px(12), px(26), px(20)),
+                row_gap: px(4),
+                ..Default::default()
+            },
+            BackgroundColor(color_rgba(24, 27, 31, 245)),
+        ))
+        .with_children(|panel| {
+            spawn_ui_text(panel, "Cargo Stranding Again", 26.0, Color::WHITE);
+            spawn_ui_text(
+                panel,
+                "Bevy app + Bevy ECS simulation",
+                18.0,
+                Color::srgb(0.5, 0.5, 0.5),
+            );
+            spawn_ui_spacer(panel, 10.0);
+            spawn_ui_text(panel, format!("Turn: {}", hud.turn), 18.0, Color::WHITE);
+            spawn_ui_text(
+                panel,
+                format!("Energy time: {}", hud.timeline),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!(
+                    "Camera: {},{} | {}x{}",
+                    hud.camera.x, hud.camera.y, hud.camera.width, hud.camera.height
+                ),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!("Player: {}, {}", hud.position.x, hud.position.y),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!(
+                    "Elevation: {} | water depth: {}",
+                    hud.elevation, hud.water_depth
+                ),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!("Stamina: {:.1}/{:.1}", hud.stamina_current, hud.stamina_max),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!("Movement: {}", hud.movement_mode.label()),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!(
+                    "Momentum: {:.1} {}",
+                    hud.momentum_amount,
+                    hud.momentum_direction
+                        .map(|direction| direction.label())
+                        .unwrap_or("none")
+                ),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!("Ready: {}", hud.ready_label),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!("Cargo: {:.1}/{:.1}", hud.cargo_current, hud.cargo_max),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_text(
+                panel,
+                format!("Delivered parcels: {}", hud.delivered_parcels),
+                18.0,
+                Color::WHITE,
+            );
+            spawn_ui_spacer(panel, 14.0);
 
-    hud_text(commands, panel_x, &mut y, "Porters", 22.0, Color::WHITE);
-    for row in porter_rows {
-        hud_text(
-            commands,
-            panel_x,
-            &mut y,
-            &format!(
-                "P{}: {},{} | {} | load {:.0} | {}",
-                row.id, row.position.x, row.position.y, row.phase_label, row.load, row.ready_label
-            ),
-            18.0,
-            Color::WHITE,
-        );
-    }
-    y += 18.0;
+            spawn_ui_text(panel, "Porters", 22.0, Color::WHITE);
+            for row in porter_rows {
+                spawn_ui_text(
+                    panel,
+                    format!(
+                        "P{}: {},{} | {} | load {:.0} | {}",
+                        row.id,
+                        row.position.x,
+                        row.position.y,
+                        row.phase_label,
+                        row.load,
+                        row.ready_label
+                    ),
+                    18.0,
+                    Color::WHITE,
+                );
+            }
+            spawn_ui_spacer(panel, 14.0);
 
-    hud_text(commands, panel_x, &mut y, "Controls", 22.0, Color::WHITE);
-    for line in CONTROL_HINTS {
-        hud_text(commands, panel_x, &mut y, line, 18.0, Color::WHITE);
-    }
-    y += 18.0;
+            spawn_ui_text(panel, "Controls", 22.0, Color::WHITE);
+            for line in CONTROL_HINTS {
+                spawn_ui_text(panel, line, 18.0, Color::WHITE);
+            }
+            spawn_ui_spacer(panel, 14.0);
 
-    hud_text(commands, panel_x, &mut y, "Legend", 22.0, Color::WHITE);
-    for line in LEGEND_LINES {
-        hud_text(commands, panel_x, &mut y, line, 18.0, Color::WHITE);
-    }
+            spawn_ui_text(panel, "Legend", 22.0, Color::WHITE);
+            for line in LEGEND_LINES {
+                spawn_ui_text(panel, line, 18.0, Color::WHITE);
+            }
+        });
 }
 
-fn hud_text(
-    commands: &mut Commands,
-    x: f32,
-    y: &mut f32,
-    text: &str,
-    font_size: f32,
-    color: Color,
+fn draw_pause_menu(
+    parent: &mut ChildSpawnerCommands,
+    menu: PauseMenuState,
+    status: &PersistenceStatus,
 ) {
-    spawn_text(commands, text, x, *y, font_size, 40.0, color);
-    *y += font_size + 6.0;
+    spawn_modal(parent, 560.0, 360.0, |panel| {
+        spawn_ui_text(panel, "Paused", 34.0, Color::WHITE);
+        spawn_ui_spacer(panel, 18.0);
+        for entry in PauseMenuEntry::ALL {
+            spawn_menu_entry(panel, entry.label(), menu.selected() == entry);
+        }
+        if let Some(message) = &status.message {
+            spawn_ui_spacer(panel, 10.0);
+            spawn_ui_text(panel, message, 18.0, color_rgba(190, 204, 214, 255));
+        }
+    });
 }
 
-fn draw_game_state_overlay(commands: &mut Commands, world: &mut SimWorld) {
-    match *world.resource::<GameScreen>() {
-        GameScreen::Playing => {}
-        GameScreen::PauseMenu => draw_pause_menu(
-            commands,
-            world.resource::<PauseMenuState>(),
-            world.resource::<PersistenceStatus>(),
-        ),
-        GameScreen::InventoryMenu => draw_inventory_menu(commands, world),
-        GameScreen::OptionsMenu => draw_options_menu(commands),
-    }
+fn draw_inventory_menu(parent: &mut ChildSpawnerCommands, entries: &[InventoryEntry]) {
+    spawn_modal(parent, 460.0, 360.0, |panel| {
+        spawn_ui_text(panel, "Inventory", 34.0, Color::WHITE);
+        spawn_ui_spacer(panel, 18.0);
+
+        if entries.is_empty() {
+            spawn_ui_text(
+                panel,
+                "No carried cargo.",
+                22.0,
+                color_rgba(210, 216, 222, 255),
+            );
+            return;
+        }
+
+        for entry in entries {
+            spawn_menu_entry(panel, &entry.label, entry.selected);
+        }
+    });
 }
 
-fn draw_pause_menu(commands: &mut Commands, menu: &PauseMenuState, status: &PersistenceStatus) {
-    draw_modal_panel(commands, 560.0, 360.0);
-    let panel_x = (initial_window_width() as f32 - 560.0) / 2.0;
-    let mut y = (WINDOW_HEIGHT - 360.0) / 2.0 + 58.0;
-    spawn_text(
-        commands,
-        "Paused",
-        panel_x + 42.0,
-        y,
-        34.0,
-        80.0,
-        Color::WHITE,
-    );
-    y += 50.0;
-
-    for entry in PauseMenuEntry::ALL {
-        draw_menu_entry(
-            commands,
-            panel_x + 42.0,
-            y,
-            entry.label(),
-            menu.selected() == entry,
-        );
-        y += 44.0;
-    }
-
-    if let Some(message) = &status.message {
-        y += 14.0;
-        spawn_text(
-            commands,
-            message,
-            panel_x + 42.0,
-            y,
-            18.0,
-            80.0,
-            color_rgba(190, 204, 214, 255),
-        );
-    }
-}
-
-fn draw_inventory_menu(commands: &mut Commands, world: &mut SimWorld) {
-    draw_modal_panel(commands, 460.0, 360.0);
-    let panel_x = (initial_window_width() as f32 - 460.0) / 2.0;
-    let mut y = (WINDOW_HEIGHT - 360.0) / 2.0 + 58.0;
-    spawn_text(
-        commands,
-        "Inventory",
-        panel_x + 42.0,
-        y,
-        34.0,
-        80.0,
-        Color::WHITE,
-    );
-    y += 50.0;
-
-    let entries = InventoryEntry::all_from_world(world);
-    if entries.is_empty() {
-        spawn_text(
-            commands,
-            "No carried cargo.",
-            panel_x + 42.0,
-            y,
+fn draw_options_menu(parent: &mut ChildSpawnerCommands) {
+    spawn_modal(parent, 420.0, 250.0, |panel| {
+        spawn_ui_text(panel, "Options", 34.0, Color::WHITE);
+        spawn_ui_spacer(panel, 20.0);
+        spawn_ui_text(
+            panel,
+            "No options yet.",
             22.0,
-            80.0,
             color_rgba(210, 216, 222, 255),
         );
-        return;
-    }
-
-    for entry in entries {
-        draw_menu_entry(commands, panel_x + 42.0, y, &entry.label, entry.selected);
-        y += 38.0;
-    }
+    });
 }
 
-fn draw_options_menu(commands: &mut Commands) {
-    draw_modal_panel(commands, 420.0, 250.0);
-    let panel_x = (initial_window_width() as f32 - 420.0) / 2.0;
-    let mut y = (WINDOW_HEIGHT - 250.0) / 2.0 + 58.0;
-    spawn_text(
-        commands,
-        "Options",
-        panel_x + 42.0,
-        y,
-        34.0,
-        80.0,
-        Color::WHITE,
-    );
-    y += 52.0;
-    spawn_text(
-        commands,
-        "No options yet.",
-        panel_x + 42.0,
-        y,
-        22.0,
-        80.0,
-        color_rgba(210, 216, 222, 255),
-    );
+fn spawn_modal(
+    parent: &mut ChildSpawnerCommands,
+    width: f32,
+    height: f32,
+    children: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn((
+            RenderedFrameEntity,
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(0),
+                top: px(0),
+                width: percent(100),
+                height: percent(100),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..Default::default()
+            },
+            BackgroundColor(color_rgba(0, 0, 0, 145)),
+            GlobalZIndex(100),
+        ))
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    RenderedFrameEntity,
+                    Node {
+                        width: px(width),
+                        height: px(height),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::FlexStart,
+                        padding: UiRect::all(px(42)),
+                        border: UiRect::all(px(2)),
+                        row_gap: px(6),
+                        ..Default::default()
+                    },
+                    BackgroundColor(color_rgba(30, 35, 41, 245)),
+                    BorderColor::all(color_rgba(220, 226, 232, 180)),
+                ))
+                .with_children(children);
+        });
 }
 
-fn draw_modal_panel(commands: &mut Commands, width: f32, height: f32) {
-    spawn_rect(
-        commands,
-        0.0,
-        0.0,
-        initial_window_width() as f32,
-        WINDOW_HEIGHT,
-        70.0,
-        color_rgba(0, 0, 0, 145),
-    );
-    let panel_x = (initial_window_width() as f32 - width) / 2.0;
-    let panel_y = (WINDOW_HEIGHT - height) / 2.0;
-    spawn_rect(
-        commands,
-        panel_x,
-        panel_y,
-        width,
-        height,
-        71.0,
-        color_rgba(30, 35, 41, 245),
-    );
-    draw_rect_outline(
-        commands,
-        panel_x,
-        panel_y,
-        width,
-        height,
-        2.0,
-        color_rgba(220, 226, 232, 180),
-    );
-}
-
-fn draw_menu_entry(commands: &mut Commands, x: f32, y: f32, label: &str, selected: bool) {
+fn spawn_menu_entry(parent: &mut ChildSpawnerCommands, label: &str, selected: bool) {
     let color = if selected {
         color_rgba(252, 204, 84, 255)
     } else {
         color_rgba(220, 225, 230, 255)
     };
     let marker = if selected { ">" } else { " " };
-    spawn_text(commands, marker, x, y, 26.0, 82.0, color);
-    spawn_text(commands, label, x + 34.0, y, 26.0, 82.0, color);
+    parent
+        .spawn((
+            RenderedFrameEntity,
+            Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: px(18),
+                min_height: px(34),
+                align_items: AlignItems::Center,
+                ..Default::default()
+            },
+        ))
+        .with_children(|row| {
+            spawn_ui_text(row, marker, 26.0, color);
+            spawn_ui_text(row, label, 26.0, color);
+        });
+}
+
+fn spawn_ui_text(
+    parent: &mut ChildSpawnerCommands,
+    text: impl Into<String>,
+    font_size: f32,
+    color: Color,
+) {
+    parent.spawn((
+        RenderedFrameEntity,
+        Text::new(text),
+        TextFont {
+            font_size: FontSize::Px(font_size),
+            ..Default::default()
+        },
+        TextColor(color),
+        Node {
+            min_height: px(font_size + 4.0),
+            ..Default::default()
+        },
+    ));
+}
+
+fn spawn_ui_spacer(parent: &mut ChildSpawnerCommands, height: f32) {
+    parent.spawn((
+        RenderedFrameEntity,
+        Node {
+            height: px(height),
+            ..Default::default()
+        },
+    ));
 }
 
 fn draw_rect_outline(
