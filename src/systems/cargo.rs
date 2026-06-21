@@ -77,6 +77,12 @@ struct PickupScratch {
     container_loads: HashMap<Entity, ContainerLoad>,
 }
 
+#[derive(Clone, Copy)]
+enum HeldCargoRequirement {
+    AnyCargo,
+    Parcel,
+}
+
 /// Resolves pickup requests into entity relationship changes.
 ///
 /// Callers choose the intended target; this system owns the legality checks and
@@ -354,24 +360,14 @@ fn validate_drop(
     actor: Entity,
     item: Entity,
 ) -> Result<(), CargoError> {
-    cargo.get(actor).map_err(|_| CargoError::MissingCargo)?;
-    let (item_marker, stats, carried_by, contained_in, _) =
-        items.get(item).map_err(|_| CargoError::MissingItem)?;
-    if item_marker.is_none() || stats.is_none() {
-        return Err(CargoError::MissingItem);
-    }
-    if carried_by.is_some_and(|carried_by| carried_by.holder == actor) {
-        return Ok(());
-    }
-    if let Some(contained_in) = contained_in {
-        if containers
-            .get(contained_in.container)
-            .is_ok_and(|carried_by| carried_by.holder == actor)
-        {
-            return Ok(());
-        }
-    }
-    Err(CargoError::NotCarriedByHolder)
+    validate_held_cargo(
+        cargo,
+        items,
+        containers,
+        actor,
+        item,
+        HeldCargoRequirement::AnyCargo,
+    )
 }
 
 fn validate_delivery(
@@ -381,10 +377,29 @@ fn validate_delivery(
     actor: Entity,
     item: Entity,
 ) -> Result<(), CargoError> {
+    validate_held_cargo(
+        cargo,
+        items,
+        containers,
+        actor,
+        item,
+        HeldCargoRequirement::Parcel,
+    )
+}
+
+fn validate_held_cargo(
+    cargo: &Query<&Cargo>,
+    items: &Query<ItemState>,
+    containers: &Query<&CarriedBy, With<Container>>,
+    actor: Entity,
+    item: Entity,
+    requirement: HeldCargoRequirement,
+) -> Result<(), CargoError> {
     cargo.get(actor).map_err(|_| CargoError::MissingCargo)?;
     let (item_marker, stats, carried_by, contained_in, parcel_state) =
         items.get(item).map_err(|_| CargoError::MissingItem)?;
-    if item_marker.is_none() || stats.is_none() || parcel_state.is_none() {
+    let parcel_required = matches!(requirement, HeldCargoRequirement::Parcel);
+    if item_marker.is_none() || stats.is_none() || (parcel_required && parcel_state.is_none()) {
         return Err(CargoError::MissingItem);
     }
     if carried_by.is_some_and(|carried_by| carried_by.holder == actor) {
