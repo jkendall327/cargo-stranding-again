@@ -30,6 +30,7 @@ pub enum CargoTarget {
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 #[relationship(relationship_target = CarriedItems)]
+#[require(Item)]
 pub struct CarriedBy {
     #[relationship]
     pub holder: Entity,
@@ -45,6 +46,7 @@ pub struct CarriedBy {
 pub struct CarriedItems(Vec<Entity>);
 
 #[derive(Component, Clone, Copy, Debug)]
+#[require(Item)]
 pub struct Container {
     pub volume_capacity: f32,
     pub weight_capacity: f32,
@@ -53,6 +55,7 @@ pub struct Container {
 /// Relationship from an item to the container entity currently holding it.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 #[relationship(relationship_target = ContainerContents)]
+#[require(Item)]
 pub struct ContainedIn {
     #[relationship]
     pub container: Entity,
@@ -70,15 +73,17 @@ pub struct Cargo {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
+#[require(Item, ParcelDelivery)]
 /// Marks an item as parcel-shaped delivery cargo.
 ///
 /// Physical cargo properties live in `CargoStats`; this marker keeps delivery
 /// gameplay distinct from generic carry mechanics without duplicating weight.
 pub struct CargoParcel;
 
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ParcelDelivery {
     /// Parcel is not currently reserved for a delivery job.
+    #[default]
     Available,
     /// Parcel is reserved by an actor, but its physical location is still
     /// described only by `Position`, `CarriedBy`, or `ContainedIn`.

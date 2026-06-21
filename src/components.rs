@@ -35,19 +35,22 @@ pub struct Velocity {
     pub dy: i32,
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Default)]
+#[require(Actor)]
 pub struct Player;
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Default)]
 pub struct Actor;
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Default)]
+#[require(Actor)]
 pub struct AutonomousActor;
 
 #[derive(Component, Debug)]
 pub struct WantsAction;
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Default)]
+#[require(Actor, AutonomousActor)]
 pub struct Porter {
     pub id: usize,
 }
