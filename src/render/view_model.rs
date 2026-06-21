@@ -264,7 +264,10 @@ fn accumulate_item(
     contained: bool,
     accumulators: &mut HashMap<Entity, ActorCargoAccumulator>,
 ) {
-    let Some((_, stats)) = world.get::<Item>(entity).zip(world.get::<CargoStats>(entity)) else {
+    let Some((_, stats)) = world
+        .get::<Item>(entity)
+        .zip(world.get::<CargoStats>(entity))
+    else {
         return;
     };
     let entry = accumulators.entry(holder).or_default();

@@ -2,8 +2,8 @@ use bevy_ecs::prelude::*;
 
 use crate::ai::pathing::first_step_toward;
 use crate::cargo::{
-    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarriedItems, CarrySlot,
-    ContainedIn, Container, ParcelDelivery,
+    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarriedItems, CarrySlot, ContainedIn,
+    Container, ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
