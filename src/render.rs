@@ -830,3 +830,33 @@ fn screen_point_to_world(x: f32, y: f32, z: f32) -> Vec3 {
         z,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_sync_spawns_world_and_ui_entities() {
+        let mut app = App::new();
+        app.insert_resource(Game::new())
+            .add_systems(Update, sync_render);
+
+        app.update();
+
+        let mut rendered = app
+            .world_mut()
+            .query_filtered::<Entity, With<RenderedFrameEntity>>();
+        let rendered_count = rendered.iter(app.world()).count();
+        let mut sprites = app.world_mut().query::<&Sprite>();
+        let sprite_count = sprites.iter(app.world()).count();
+        let mut nodes = app.world_mut().query::<&Node>();
+        let node_count = nodes.iter(app.world()).count();
+        let mut texts = app.world_mut().query::<&Text>();
+        let text_count = texts.iter(app.world()).count();
+
+        assert!(rendered_count > 0);
+        assert!(sprite_count > 0, "world scene should spawn sprite entities");
+        assert!(node_count > 0, "HUD should spawn Bevy UI nodes");
+        assert!(text_count > 0, "HUD should spawn Bevy UI text");
+    }
+}
