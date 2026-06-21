@@ -65,8 +65,18 @@ pub fn run() {
     init_world(app.world_mut());
 
     app.insert_resource(GameSchedules::new())
-        .add_systems(Startup, render::setup_camera)
-        .add_systems(Update, (tick_game, render::sync_render).chain())
+        .init_resource::<render::MenuUiFingerprint>()
+        .add_systems(Startup, (render::setup_camera, render::spawn_hud).chain())
+        .add_systems(
+            Update,
+            (
+                tick_game,
+                render::sync_render,
+                render::update_hud,
+                render::sync_menu_ui,
+            )
+                .chain(),
+        )
         .run();
 }
 

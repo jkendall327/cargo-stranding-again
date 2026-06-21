@@ -42,6 +42,41 @@ const LEGEND_LINES: [&str; 5] = [
 #[derive(Component)]
 pub(crate) struct RenderedFrameEntity;
 
+#[derive(Component)]
+pub(crate) struct HudRoot;
+
+#[derive(Component, Clone, Copy)]
+enum HudTextField {
+    Turn,
+    Timeline,
+    Camera,
+    Player,
+    Terrain,
+    Stamina,
+    Movement,
+    Momentum,
+    Ready,
+    Cargo,
+    Delivered,
+    Porters,
+}
+
+#[derive(Component)]
+struct HudText {
+    field: HudTextField,
+}
+
+#[derive(Component)]
+struct MenuRoot;
+
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub struct MenuUiFingerprint {
+    screen: GameScreen,
+    pause_selected: Option<PauseMenuEntry>,
+    persistence_status: Option<String>,
+    inventory_entries: Vec<(String, bool)>,
+}
+
 pub fn initial_window_width() -> u32 {
     layout::window_width_for_camera(DEFAULT_CAMERA_TILE_SPAN) as u32
 }
@@ -79,7 +114,6 @@ pub(crate) fn sync_render(world: &mut World) {
     draw_porters(world, camera, &actor_cargo);
     draw_player(world, camera, &actor_cargo);
     draw_viewport_frame(world, camera);
-    draw_ui(world, camera);
 }
 
 fn update_camera(world: &mut World) {
@@ -398,62 +432,13 @@ fn draw_actor_cargo_badge(world: &mut World, px: f32, py: f32, cargo: &ActorCarg
     spawn_text(world, &label, px + 10.0, py + 7.0, 8.0, 27.0, Color::BLACK);
 }
 
-fn draw_ui(world: &mut World, camera: Camera) {
-    let screen = *world.resource::<GameScreen>();
-    let pause_menu = *world.resource::<PauseMenuState>();
-    let persistence_status = world.resource::<PersistenceStatus>().clone();
-    let hud = PlayerHudSnapshot::from_world(world, camera);
-    let porter_rows = PorterDebugRow::all_from_world(world);
-    let inventory_entries = if screen == GameScreen::InventoryMenu {
-        InventoryEntry::all_from_world(world)
-    } else {
-        Vec::new()
-    };
+pub(crate) fn spawn_hud(world: &mut World) {
+    let camera = *world.resource::<Camera>();
+    let panel_x = ui_x(camera);
 
     world
         .spawn((
-            RenderedFrameEntity,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(0),
-                top: px(0),
-                width: percent(100),
-                height: percent(100),
-                ..Default::default()
-            },
-            GlobalZIndex(10),
-        ))
-        .with_children(|parent| {
-            draw_hud(parent, hud, &porter_rows, camera);
-            match screen {
-                GameScreen::Playing => {}
-                GameScreen::PauseMenu => {
-                    draw_pause_menu(parent, pause_menu, &persistence_status);
-                }
-                GameScreen::InventoryMenu => {
-                    draw_inventory_menu(parent, &inventory_entries);
-                }
-                GameScreen::OptionsMenu => {
-                    draw_options_menu(parent);
-                }
-            }
-        });
-}
-
-fn draw_hud(
-    parent: &mut ChildSpawner,
-    hud: Option<PlayerHudSnapshot>,
-    porter_rows: &[PorterDebugRow],
-    camera: Camera,
-) {
-    let Some(hud) = hud else {
-        return;
-    };
-    let panel_x = ui_x(camera);
-
-    parent
-        .spawn((
-            RenderedFrameEntity,
+            HudRoot,
             Node {
                 position_type: PositionType::Absolute,
                 left: px(panel_x - 12.0),
@@ -477,98 +462,21 @@ fn draw_hud(
                 Color::srgb(0.5, 0.5, 0.5),
             );
             spawn_ui_spacer(panel, 10.0);
-            spawn_ui_text(panel, format!("Turn: {}", hud.turn), 18.0, Color::WHITE);
-            spawn_ui_text(
-                panel,
-                format!("Energy time: {}", hud.timeline),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!(
-                    "Camera: {},{} | {}x{}",
-                    hud.camera.x, hud.camera.y, hud.camera.width, hud.camera.height
-                ),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!("Player: {}, {}", hud.position.x, hud.position.y),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!(
-                    "Elevation: {} | water depth: {}",
-                    hud.elevation, hud.water_depth
-                ),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!("Stamina: {:.1}/{:.1}", hud.stamina_current, hud.stamina_max),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!("Movement: {}", hud.movement_mode.label()),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!(
-                    "Momentum: {:.1} {}",
-                    hud.momentum_amount,
-                    hud.momentum_direction
-                        .map(|direction| direction.label())
-                        .unwrap_or("none")
-                ),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!("Ready: {}", hud.ready_label),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!("Cargo: {:.1}/{:.1}", hud.cargo_current, hud.cargo_max),
-                18.0,
-                Color::WHITE,
-            );
-            spawn_ui_text(
-                panel,
-                format!("Delivered parcels: {}", hud.delivered_parcels),
-                18.0,
-                Color::WHITE,
-            );
+            spawn_hud_text(panel, HudTextField::Turn);
+            spawn_hud_text(panel, HudTextField::Timeline);
+            spawn_hud_text(panel, HudTextField::Camera);
+            spawn_hud_text(panel, HudTextField::Player);
+            spawn_hud_text(panel, HudTextField::Terrain);
+            spawn_hud_text(panel, HudTextField::Stamina);
+            spawn_hud_text(panel, HudTextField::Movement);
+            spawn_hud_text(panel, HudTextField::Momentum);
+            spawn_hud_text(panel, HudTextField::Ready);
+            spawn_hud_text(panel, HudTextField::Cargo);
+            spawn_hud_text(panel, HudTextField::Delivered);
             spawn_ui_spacer(panel, 14.0);
 
             spawn_ui_text(panel, "Porters", 22.0, Color::WHITE);
-            for row in porter_rows {
-                spawn_ui_text(
-                    panel,
-                    format!(
-                        "P{}: {},{} | {} | load {:.0} | {}",
-                        row.id,
-                        row.position.x,
-                        row.position.y,
-                        row.phase_label,
-                        row.load,
-                        row.ready_label
-                    ),
-                    18.0,
-                    Color::WHITE,
-                );
-            }
+            spawn_hud_text(panel, HudTextField::Porters);
             spawn_ui_spacer(panel, 14.0);
 
             spawn_ui_text(panel, "Controls", 22.0, Color::WHITE);
@@ -584,21 +492,192 @@ fn draw_hud(
         });
 }
 
-fn draw_pause_menu(parent: &mut ChildSpawner, menu: PauseMenuState, status: &PersistenceStatus) {
+pub(crate) fn update_hud(world: &mut World) {
+    let camera = *world.resource::<Camera>();
+    let Some(hud) = PlayerHudSnapshot::from_world(world, camera) else {
+        return;
+    };
+    let porter_rows = PorterDebugRow::all_from_world(world);
+    let text_entities = {
+        let mut query = world.query::<(Entity, &HudText)>();
+        query
+            .iter(world)
+            .map(|(entity, text)| (entity, text.field))
+            .collect::<Vec<_>>()
+    };
+
+    for (entity, field) in text_entities {
+        if let Some(mut text) = world.get_mut::<Text>(entity) {
+            text.0 = hud_text(field, &hud, &porter_rows);
+        }
+    }
+}
+
+pub(crate) fn sync_menu_ui(world: &mut World) {
+    let fingerprint = menu_fingerprint(world);
+    if world.resource::<MenuUiFingerprint>() == &fingerprint {
+        return;
+    }
+
+    let menu_roots = {
+        let mut query = world.query_filtered::<Entity, With<MenuRoot>>();
+        query.iter(world).collect::<Vec<_>>()
+    };
+    for entity in menu_roots {
+        world.entity_mut(entity).despawn();
+    }
+
+    match fingerprint.screen {
+        GameScreen::Playing => {}
+        GameScreen::PauseMenu => spawn_pause_menu_root(
+            world,
+            fingerprint.pause_selected.unwrap_or(PauseMenuEntry::Resume),
+            fingerprint.persistence_status.as_deref(),
+        ),
+        GameScreen::InventoryMenu => {
+            spawn_inventory_menu_root(world, &fingerprint.inventory_entries);
+        }
+        GameScreen::OptionsMenu => spawn_options_menu_root(world),
+    }
+
+    *world.resource_mut::<MenuUiFingerprint>() = fingerprint;
+}
+
+fn spawn_hud_text(parent: &mut ChildSpawner, field: HudTextField) {
+    parent.spawn((
+        HudText { field },
+        Text::new(""),
+        TextFont {
+            font_size: FontSize::Px(18.0),
+            ..Default::default()
+        },
+        TextColor(Color::WHITE),
+        Node {
+            min_height: px(22.0),
+            ..Default::default()
+        },
+    ));
+}
+
+fn hud_text(
+    field: HudTextField,
+    hud: &PlayerHudSnapshot,
+    porter_rows: &[PorterDebugRow],
+) -> String {
+    match field {
+        HudTextField::Turn => format!("Turn: {}", hud.turn),
+        HudTextField::Timeline => format!("Energy time: {}", hud.timeline),
+        HudTextField::Camera => format!(
+            "Camera: {},{} | {}x{}",
+            hud.camera.x, hud.camera.y, hud.camera.width, hud.camera.height
+        ),
+        HudTextField::Player => format!("Player: {}, {}", hud.position.x, hud.position.y),
+        HudTextField::Terrain => format!(
+            "Elevation: {} | water depth: {}",
+            hud.elevation, hud.water_depth
+        ),
+        HudTextField::Stamina => {
+            format!("Stamina: {:.1}/{:.1}", hud.stamina_current, hud.stamina_max)
+        }
+        HudTextField::Movement => format!("Movement: {}", hud.movement_mode.label()),
+        HudTextField::Momentum => format!(
+            "Momentum: {:.1} {}",
+            hud.momentum_amount,
+            hud.momentum_direction
+                .map(|direction| direction.label())
+                .unwrap_or("none")
+        ),
+        HudTextField::Ready => format!("Ready: {}", hud.ready_label),
+        HudTextField::Cargo => format!("Cargo: {:.1}/{:.1}", hud.cargo_current, hud.cargo_max),
+        HudTextField::Delivered => format!("Delivered parcels: {}", hud.delivered_parcels),
+        HudTextField::Porters => porter_rows
+            .iter()
+            .map(|row| {
+                format!(
+                    "P{}: {},{} | {} | load {:.0} | {}",
+                    row.id,
+                    row.position.x,
+                    row.position.y,
+                    row.phase_label,
+                    row.load,
+                    row.ready_label
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn menu_fingerprint(world: &mut World) -> MenuUiFingerprint {
+    let screen = *world.resource::<GameScreen>();
+    let pause_selected =
+        (screen == GameScreen::PauseMenu).then(|| world.resource::<PauseMenuState>().selected());
+    let persistence_status = world.resource::<PersistenceStatus>().message.clone();
+    let inventory_entries = if screen == GameScreen::InventoryMenu {
+        InventoryEntry::all_from_world(world)
+            .into_iter()
+            .map(|entry| (entry.label, entry.selected))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    MenuUiFingerprint {
+        screen,
+        pause_selected,
+        persistence_status,
+        inventory_entries,
+    }
+}
+
+fn spawn_pause_menu_root(world: &mut World, selected: PauseMenuEntry, status: Option<&str>) {
+    world
+        .spawn(menu_root_bundle())
+        .with_children(|parent| draw_pause_menu(parent, selected, status));
+}
+
+fn spawn_inventory_menu_root(world: &mut World, entries: &[(String, bool)]) {
+    world
+        .spawn(menu_root_bundle())
+        .with_children(|parent| draw_inventory_menu(parent, entries));
+}
+
+fn spawn_options_menu_root(world: &mut World) {
+    world
+        .spawn(menu_root_bundle())
+        .with_children(draw_options_menu);
+}
+
+fn menu_root_bundle() -> impl Bundle {
+    (
+        MenuRoot,
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(0),
+            top: px(0),
+            width: percent(100),
+            height: percent(100),
+            ..Default::default()
+        },
+        GlobalZIndex(100),
+    )
+}
+
+fn draw_pause_menu(parent: &mut ChildSpawner, selected: PauseMenuEntry, status: Option<&str>) {
     spawn_modal(parent, 560.0, 360.0, |panel| {
         spawn_ui_text(panel, "Paused", 34.0, Color::WHITE);
         spawn_ui_spacer(panel, 18.0);
         for entry in PauseMenuEntry::ALL {
-            spawn_menu_entry(panel, entry.label(), menu.selected() == entry);
+            spawn_menu_entry(panel, entry.label(), selected == entry);
         }
-        if let Some(message) = &status.message {
+        if let Some(message) = status {
             spawn_ui_spacer(panel, 10.0);
             spawn_ui_text(panel, message, 18.0, color_rgba(190, 204, 214, 255));
         }
     });
 }
 
-fn draw_inventory_menu(parent: &mut ChildSpawner, entries: &[InventoryEntry]) {
+fn draw_inventory_menu(parent: &mut ChildSpawner, entries: &[(String, bool)]) {
     spawn_modal(parent, 460.0, 360.0, |panel| {
         spawn_ui_text(panel, "Inventory", 34.0, Color::WHITE);
         spawn_ui_spacer(panel, 18.0);
@@ -613,8 +692,8 @@ fn draw_inventory_menu(parent: &mut ChildSpawner, entries: &[InventoryEntry]) {
             return;
         }
 
-        for entry in entries {
-            spawn_menu_entry(panel, &entry.label, entry.selected);
+        for (label, selected) in entries {
+            spawn_menu_entry(panel, label, *selected);
         }
     });
 }
@@ -640,7 +719,6 @@ fn spawn_modal(
 ) {
     parent
         .spawn((
-            RenderedFrameEntity,
             Node {
                 position_type: PositionType::Absolute,
                 left: px(0),
@@ -657,7 +735,6 @@ fn spawn_modal(
         .with_children(|overlay| {
             overlay
                 .spawn((
-                    RenderedFrameEntity,
                     Node {
                         width: px(width),
                         height: px(height),
@@ -683,16 +760,13 @@ fn spawn_menu_entry(parent: &mut ChildSpawner, label: &str, selected: bool) {
     };
     let marker = if selected { ">" } else { " " };
     parent
-        .spawn((
-            RenderedFrameEntity,
-            Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: px(18),
-                min_height: px(34),
-                align_items: AlignItems::Center,
-                ..Default::default()
-            },
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            column_gap: px(18),
+            min_height: px(34),
+            align_items: AlignItems::Center,
+            ..Default::default()
+        },))
         .with_children(|row| {
             spawn_ui_text(row, marker, 26.0, color);
             spawn_ui_text(row, label, 26.0, color);
@@ -701,7 +775,6 @@ fn spawn_menu_entry(parent: &mut ChildSpawner, label: &str, selected: bool) {
 
 fn spawn_ui_text(parent: &mut ChildSpawner, text: impl Into<String>, font_size: f32, color: Color) {
     parent.spawn((
-        RenderedFrameEntity,
         Text::new(text),
         TextFont {
             font_size: FontSize::Px(font_size),
@@ -716,13 +789,10 @@ fn spawn_ui_text(parent: &mut ChildSpawner, text: impl Into<String>, font_size: 
 }
 
 fn spawn_ui_spacer(parent: &mut ChildSpawner, height: f32) {
-    parent.spawn((
-        RenderedFrameEntity,
-        Node {
-            height: px(height),
-            ..Default::default()
-        },
-    ));
+    parent.spawn((Node {
+        height: px(height),
+        ..Default::default()
+    },));
 }
 
 fn draw_rect_outline(
@@ -797,7 +867,9 @@ mod tests {
     fn render_sync_spawns_world_and_ui_entities() {
         let mut app = App::new();
         crate::world_setup::init_world(app.world_mut());
-        app.add_systems(Update, sync_render);
+        app.init_resource::<MenuUiFingerprint>()
+            .add_systems(Startup, spawn_hud)
+            .add_systems(Update, (sync_render, update_hud, sync_menu_ui).chain());
 
         app.update();
 
