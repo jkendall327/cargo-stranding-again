@@ -106,6 +106,10 @@ fn current_menu_action(
     keybindings: &KeyBindings,
     keyboard: &ButtonInput<KeyCode>,
 ) -> Option<MenuAction> {
+    if help_key_just_pressed(keyboard) {
+        return Some(MenuAction::ToggleHelp);
+    }
+
     let action = pressed_action(&keybindings.menu, keyboard)?;
     if action == MenuAction::Cancel {
         return Some(action);
@@ -113,6 +117,13 @@ fn current_menu_action(
 
     match game_screen {
         GameScreen::Playing => None,
+        GameScreen::HelpModal => {
+            if action == MenuAction::Cancel {
+                Some(action)
+            } else {
+                None
+            }
+        }
         GameScreen::PauseMenu | GameScreen::InventoryMenu => Some(action),
         GameScreen::OptionsMenu => {
             if action == MenuAction::Cancel {
@@ -122,6 +133,11 @@ fn current_menu_action(
             }
         }
     }
+}
+
+fn help_key_just_pressed(keyboard: &ButtonInput<KeyCode>) -> bool {
+    keyboard.just_pressed(KeyCode::Slash)
+        && (keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight))
 }
 
 fn current_held_action(

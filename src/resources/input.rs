@@ -52,6 +52,7 @@ pub enum MenuAction {
     MoveSelectionDown,
     Confirm,
     Cancel,
+    ToggleHelp,
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default)]

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use bevy_ecs::prelude::{ChildSpawner, With};
 
 mod layout;
@@ -9,7 +10,7 @@ mod view_model;
 use crate::components::*;
 use crate::map::{Map, Terrain, TileCoord};
 use crate::render::layout::{
-    tile_to_screen, ui_x, viewport_height, viewport_width, VIEWPORT_X, VIEWPORT_Y,
+    tile_to_screen, viewport_height, viewport_width, VIEWPORT_X, VIEWPORT_Y,
 };
 use crate::render::view_model::{
     ActorCargoRender, CargoHolderKind, InventoryEntry, LooseCargoRender, LooseCargoState,
@@ -20,8 +21,8 @@ use crate::resources::{
 };
 
 pub const TILE_SIZE: f32 = 16.0;
-const WINDOW_HEIGHT: f32 = 1160.0;
-const UI_PANEL_WIDTH: f32 = 1220.0;
+const INITIAL_WINDOW_WIDTH: f32 = 1280.0;
+const INITIAL_WINDOW_HEIGHT: f32 = 720.0;
 const CONTROL_HINTS: [&str; 9] = [
     "WASD / Arrows: move one tile",
     "Space / .: wait and recover stamina",
@@ -29,9 +30,9 @@ const CONTROL_HINTS: [&str; 9] = [
     "I / Tab: open inventory",
     "Shift: cycle walk / sprint / steady",
     "Esc: pause / resume",
+    "?: show this panel",
     "Energy advances only on valid action",
     "Water blocks movement",
-    "Sprint is fast; steady saves stamina",
 ];
 const LEGEND_LINES: [&str; 5] = [
     "@ player",
@@ -41,18 +42,15 @@ const LEGEND_LINES: [&str; 5] = [
     "Small badges: carried cargo",
 ];
 
-const CAMERA_TILE_COUNT: usize =
-    (DEFAULT_CAMERA_TILE_SPAN as usize) * (DEFAULT_CAMERA_TILE_SPAN as usize);
-
 #[derive(Component)]
 struct ViewportBackground;
 
 #[derive(Component, Clone, Copy)]
-struct ViewportFrameSegment {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
+enum ViewportFrameSegment {
+    Top,
+    Bottom,
+    Left,
+    Right,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -133,11 +131,11 @@ pub struct MenuUiFingerprint {
 }
 
 pub fn initial_window_width() -> u32 {
-    layout::window_width_for_camera(DEFAULT_CAMERA_TILE_SPAN) as u32
+    INITIAL_WINDOW_WIDTH as u32
 }
 
 pub fn initial_window_height() -> u32 {
-    WINDOW_HEIGHT as u32
+    INITIAL_WINDOW_HEIGHT as u32
 }
 
 pub fn color_rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
@@ -182,9 +180,18 @@ fn update_camera(world: &mut World) {
         let map = world.resource::<Map>();
         map.bounds()
     };
-    world
-        .resource_mut::<Camera>()
-        .center_on(player_position, bounds);
+    let (width, height) = camera_tile_dimensions(world);
+    let mut camera = world.resource_mut::<Camera>();
+    camera.resize_tiles(width, height);
+    camera.center_on(player_position, bounds);
+}
+
+fn camera_tile_dimensions(world: &mut World) -> (i32, i32) {
+    let dimensions = window_dimensions(world);
+    (
+        (dimensions.x / TILE_SIZE).ceil().max(1.0) as i32,
+        (dimensions.y / TILE_SIZE).ceil().max(1.0) as i32,
+    )
 }
 
 fn terrain_color(terrain: Terrain, elevation: i16, water_depth: u8) -> Color {
@@ -219,7 +226,12 @@ fn spawn_viewport_chrome(world: &mut World) {
         Transform::default(),
         Visibility::default(),
     ));
-    for segment in viewport_frame_segments(Camera::default()) {
+    for segment in [
+        ViewportFrameSegment::Top,
+        ViewportFrameSegment::Bottom,
+        ViewportFrameSegment::Left,
+        ViewportFrameSegment::Right,
+    ] {
         world.spawn((
             segment,
             Sprite::default(),
@@ -250,122 +262,107 @@ fn sync_viewport_chrome(world: &mut World, camera: Camera) {
         );
     }
 
-    for segment in viewport_frame_segments(camera) {
-        let entity = {
-            let mut query = world.query::<(Entity, &ViewportFrameSegment)>();
-            query
-                .iter(world)
-                .find(|(_, existing)| {
-                    existing.x == segment.x
-                        && existing.y == segment.y
-                        && existing.width == segment.width
-                        && existing.height == segment.height
-                })
-                .map(|(entity, _)| entity)
-        };
-        if let Some(entity) = entity {
-            set_sprite(
-                world,
-                entity,
-                SpriteRender {
-                    x: segment.x,
-                    y: segment.y,
-                    width: segment.width,
-                    height: segment.height,
-                    z: 50.0,
-                    color: color_rgba(215, 220, 226, 180),
-                    visible: true,
-                },
-            );
-        }
+    let frame_segments = {
+        let mut query = world.query::<(Entity, &ViewportFrameSegment)>();
+        query
+            .iter(world)
+            .map(|(entity, segment)| (entity, *segment))
+            .collect::<Vec<_>>()
+    };
+
+    for (entity, segment) in frame_segments {
+        set_sprite(world, entity, viewport_frame_render(segment, camera));
     }
 }
 
-fn viewport_frame_segments(camera: Camera) -> [ViewportFrameSegment; 4] {
-    let x = VIEWPORT_X - 1.0;
-    let y = VIEWPORT_Y - 1.0;
-    let width = viewport_width(camera) + 2.0;
-    let height = viewport_height(camera) + 2.0;
+fn viewport_frame_render(segment: ViewportFrameSegment, camera: Camera) -> SpriteRender {
+    let x = VIEWPORT_X;
+    let y = VIEWPORT_Y;
+    let width = viewport_width(camera);
+    let height = viewport_height(camera);
     let thickness = 2.0;
-    [
-        ViewportFrameSegment {
-            x,
-            y,
-            width,
-            height: thickness,
-        },
-        ViewportFrameSegment {
-            x,
-            y: y + height - thickness,
-            width,
-            height: thickness,
-        },
-        ViewportFrameSegment {
-            x,
-            y,
-            width: thickness,
-            height,
-        },
-        ViewportFrameSegment {
-            x: x + width - thickness,
-            y,
-            width: thickness,
-            height,
-        },
-    ]
+    let (x, y, width, height) = match segment {
+        ViewportFrameSegment::Top => (x, y, width, thickness),
+        ViewportFrameSegment::Bottom => (x, y + height - thickness, width, thickness),
+        ViewportFrameSegment::Left => (x, y, thickness, height),
+        ViewportFrameSegment::Right => (x + width - thickness, y, thickness, height),
+    };
+
+    SpriteRender {
+        x,
+        y,
+        width,
+        height,
+        z: 50.0,
+        color: color_rgba(215, 220, 226, 180),
+        visible: true,
+    }
 }
 
 fn spawn_map_tile_pool(world: &mut World) {
-    debug_assert_eq!(
-        CAMERA_TILE_COUNT,
-        (DEFAULT_CAMERA_TILE_SPAN * DEFAULT_CAMERA_TILE_SPAN) as usize
-    );
     for offset_y in 0..DEFAULT_CAMERA_TILE_SPAN {
         for offset_x in 0..DEFAULT_CAMERA_TILE_SPAN {
-            world.spawn((
-                MapTileSprite { offset_x, offset_y },
-                Sprite::default(),
-                Transform::default(),
-                Visibility::default(),
-            ));
-            world.spawn((
-                MapTileElevationText { offset_x, offset_y },
-                Text2d::new(""),
-                TextFont {
-                    font_size: FontSize::Px(8.0),
-                    ..Default::default()
-                },
-                TextColor(color_rgba(245, 245, 235, 175)),
-                Transform::default(),
-                Visibility::default(),
-            ));
-            world.spawn((
-                MapTileAuxText { offset_x, offset_y },
-                Text2d::new(""),
-                TextFont {
-                    font_size: FontSize::Px(8.0),
-                    ..Default::default()
-                },
-                TextColor(color_rgba(210, 235, 255, 210)),
-                Transform::default(),
-                Visibility::default(),
-            ));
+            spawn_map_tile_parts(world, offset_x, offset_y);
         }
     }
 }
 
-fn sync_map_tiles(world: &mut World, camera: Camera) {
-    let tile_updates = {
-        let map = world.resource::<Map>();
-        let mut updates = Vec::with_capacity(CAMERA_TILE_COUNT);
-        for offset_y in 0..camera.height {
-            for offset_x in 0..camera.width {
-                let coord = TileCoord::new(camera.x + offset_x, camera.y + offset_y);
-                updates.push((offset_x, offset_y, coord, map.tile_at_coord(coord)));
+fn ensure_map_tile_pool(world: &mut World, camera: Camera) {
+    let existing = {
+        let mut query = world.query::<&MapTileSprite>();
+        query
+            .iter(world)
+            .map(|tile| (tile.offset_x, tile.offset_y))
+            .collect::<HashSet<_>>()
+    };
+
+    for offset_y in 0..camera.height {
+        for offset_x in 0..camera.width {
+            if !existing.contains(&(offset_x, offset_y)) {
+                spawn_map_tile_parts(world, offset_x, offset_y);
             }
         }
-        updates
-    };
+    }
+}
+
+fn spawn_map_tile_parts(world: &mut World, offset_x: i32, offset_y: i32) {
+    world.spawn((
+        MapTileSprite { offset_x, offset_y },
+        Sprite::default(),
+        Transform::default(),
+        Visibility::default(),
+    ));
+    world.spawn((
+        MapTileElevationText { offset_x, offset_y },
+        Text2d::new(""),
+        TextFont {
+            font_size: FontSize::Px(8.0),
+            ..Default::default()
+        },
+        TextColor(color_rgba(245, 245, 235, 175)),
+        Transform::default(),
+        Visibility::default(),
+    ));
+    world.spawn((
+        MapTileAuxText { offset_x, offset_y },
+        Text2d::new(""),
+        TextFont {
+            font_size: FontSize::Px(8.0),
+            ..Default::default()
+        },
+        TextColor(color_rgba(210, 235, 255, 210)),
+        Transform::default(),
+        Visibility::default(),
+    ));
+}
+
+fn coord_for_camera_offset(camera: Camera, offset_x: i32, offset_y: i32) -> Option<TileCoord> {
+    (offset_x < camera.width && offset_y < camera.height)
+        .then(|| TileCoord::new(camera.x + offset_x, camera.y + offset_y))
+}
+
+fn sync_map_tiles(world: &mut World, camera: Camera) {
+    ensure_map_tile_pool(world, camera);
 
     let sprites = {
         let mut query = world.query::<(Entity, &MapTileSprite)>();
@@ -390,18 +387,19 @@ fn sync_map_tiles(world: &mut World, camera: Camera) {
     };
 
     for (entity, offset_x, offset_y) in sprites {
-        let Some((_, _, coord, tile)) = tile_updates
-            .iter()
-            .find(|(x, y, _, _)| *x == offset_x && *y == offset_y)
-        else {
+        let Some(coord) = coord_for_camera_offset(camera, offset_x, offset_y) else {
             set_visibility(world, entity, false);
             continue;
+        };
+        let tile = {
+            let map = world.resource::<Map>();
+            map.tile_at_coord(coord)
         };
         let Some(tile) = tile else {
             set_visibility(world, entity, false);
             continue;
         };
-        let (px, py) = tile_to_screen(camera, *coord);
+        let (px, py) = tile_to_screen(camera, coord);
         set_sprite(
             world,
             entity,
@@ -418,14 +416,19 @@ fn sync_map_tiles(world: &mut World, camera: Camera) {
     }
 
     for (entity, offset_x, offset_y) in elevation_text {
-        let Some((_, _, coord, Some(tile))) = tile_updates
-            .iter()
-            .find(|(x, y, _, _)| *x == offset_x && *y == offset_y)
-        else {
+        let Some(coord) = coord_for_camera_offset(camera, offset_x, offset_y) else {
             set_visibility(world, entity, false);
             continue;
         };
-        let (px, py) = tile_to_screen(camera, *coord);
+        let tile = {
+            let map = world.resource::<Map>();
+            map.tile_at_coord(coord)
+        };
+        let Some(tile) = tile else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let (px, py) = tile_to_screen(camera, coord);
         set_text(
             world,
             entity,
@@ -442,10 +445,15 @@ fn sync_map_tiles(world: &mut World, camera: Camera) {
     }
 
     for (entity, offset_x, offset_y) in aux_text {
-        let Some((_, _, coord, Some(tile))) = tile_updates
-            .iter()
-            .find(|(x, y, _, _)| *x == offset_x && *y == offset_y)
-        else {
+        let Some(coord) = coord_for_camera_offset(camera, offset_x, offset_y) else {
+            set_visibility(world, entity, false);
+            continue;
+        };
+        let tile = {
+            let map = world.resource::<Map>();
+            map.tile_at_coord(coord)
+        };
+        let Some(tile) = tile else {
             set_visibility(world, entity, false);
             continue;
         };
@@ -469,7 +477,7 @@ fn sync_map_tiles(world: &mut World, camera: Camera) {
             set_visibility(world, entity, false);
             continue;
         };
-        let (px, py) = tile_to_screen(camera, *coord);
+        let (px, py) = tile_to_screen(camera, coord);
         set_text(
             world,
             entity,
@@ -827,66 +835,6 @@ fn sync_actor_cargo_badge(
     );
 }
 
-pub(crate) fn spawn_hud(world: &mut World) {
-    let camera = *world.resource::<Camera>();
-    let panel_x = ui_x(camera);
-
-    world
-        .spawn((
-            HudRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                left: px(panel_x - 12.0),
-                top: px(0),
-                width: px(UI_PANEL_WIDTH + 24.0),
-                height: percent(100),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::FlexStart,
-                padding: UiRect::new(px(12), px(12), px(26), px(20)),
-                row_gap: px(4),
-                ..Default::default()
-            },
-            BackgroundColor(color_rgba(24, 27, 31, 245)),
-        ))
-        .with_children(|panel| {
-            spawn_ui_text(panel, "Cargo Stranding Again", 26.0, Color::WHITE);
-            spawn_ui_text(
-                panel,
-                "Bevy app + Bevy ECS simulation",
-                18.0,
-                Color::srgb(0.5, 0.5, 0.5),
-            );
-            spawn_ui_spacer(panel, 10.0);
-            spawn_hud_text(panel, HudTextField::Turn);
-            spawn_hud_text(panel, HudTextField::Timeline);
-            spawn_hud_text(panel, HudTextField::Camera);
-            spawn_hud_text(panel, HudTextField::Player);
-            spawn_hud_text(panel, HudTextField::Terrain);
-            spawn_hud_text(panel, HudTextField::Stamina);
-            spawn_hud_text(panel, HudTextField::Movement);
-            spawn_hud_text(panel, HudTextField::Momentum);
-            spawn_hud_text(panel, HudTextField::Ready);
-            spawn_hud_text(panel, HudTextField::Cargo);
-            spawn_hud_text(panel, HudTextField::Delivered);
-            spawn_ui_spacer(panel, 14.0);
-
-            spawn_ui_text(panel, "Porters", 22.0, Color::WHITE);
-            spawn_hud_text(panel, HudTextField::Porters);
-            spawn_ui_spacer(panel, 14.0);
-
-            spawn_ui_text(panel, "Controls", 22.0, Color::WHITE);
-            for line in CONTROL_HINTS {
-                spawn_ui_text(panel, line, 18.0, Color::WHITE);
-            }
-            spawn_ui_spacer(panel, 14.0);
-
-            spawn_ui_text(panel, "Legend", 22.0, Color::WHITE);
-            for line in LEGEND_LINES {
-                spawn_ui_text(panel, line, 18.0, Color::WHITE);
-            }
-        });
-}
-
 pub(crate) fn update_hud(world: &mut World) {
     let camera = *world.resource::<Camera>();
     let Some(hud) = PlayerHudSnapshot::from_world(world, camera) else {
@@ -924,6 +872,7 @@ pub(crate) fn sync_menu_ui(world: &mut World) {
 
     match fingerprint.screen {
         GameScreen::Playing => {}
+        GameScreen::HelpModal => spawn_help_modal_root(world),
         GameScreen::PauseMenu => spawn_pause_menu_root(
             world,
             fingerprint.pause_selected.unwrap_or(PauseMenuEntry::Resume),
@@ -1025,6 +974,12 @@ fn menu_fingerprint(world: &mut World) -> MenuUiFingerprint {
     }
 }
 
+fn spawn_help_modal_root(world: &mut World) {
+    world
+        .spawn(menu_root_bundle())
+        .with_children(draw_help_modal);
+}
+
 fn spawn_pause_menu_root(world: &mut World, selected: PauseMenuEntry, status: Option<&str>) {
     world
         .spawn(menu_root_bundle())
@@ -1056,6 +1011,90 @@ fn menu_root_bundle() -> impl Bundle {
         },
         GlobalZIndex(100),
     )
+}
+
+fn draw_help_modal(parent: &mut ChildSpawner) {
+    spawn_modal(parent, 900.0, 560.0, |panel| {
+        panel
+            .spawn((
+                HudRoot,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::FlexStart,
+                    row_gap: px(8),
+                    ..Default::default()
+                },
+            ))
+            .with_children(|panel| {
+                spawn_ui_text(panel, "Cargo Stranding Again", 30.0, Color::WHITE);
+                spawn_ui_text(
+                    panel,
+                    "Bevy app + Bevy ECS simulation",
+                    16.0,
+                    Color::srgb(0.5, 0.5, 0.5),
+                );
+                panel
+                    .spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::FlexStart,
+                        column_gap: px(42),
+                        ..Default::default()
+                    },))
+                    .with_children(|columns| {
+                        spawn_help_status_column(columns);
+                        spawn_help_reference_column(columns);
+                    });
+            });
+    });
+}
+
+fn spawn_help_status_column(parent: &mut ChildSpawner) {
+    parent
+        .spawn((Node {
+            width: px(430),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexStart,
+            row_gap: px(3),
+            ..Default::default()
+        },))
+        .with_children(|panel| {
+            spawn_hud_text(panel, HudTextField::Turn);
+            spawn_hud_text(panel, HudTextField::Timeline);
+            spawn_hud_text(panel, HudTextField::Camera);
+            spawn_hud_text(panel, HudTextField::Player);
+            spawn_hud_text(panel, HudTextField::Terrain);
+            spawn_hud_text(panel, HudTextField::Stamina);
+            spawn_hud_text(panel, HudTextField::Movement);
+            spawn_hud_text(panel, HudTextField::Momentum);
+            spawn_hud_text(panel, HudTextField::Ready);
+            spawn_hud_text(panel, HudTextField::Cargo);
+            spawn_hud_text(panel, HudTextField::Delivered);
+            spawn_ui_spacer(panel, 8.0);
+            spawn_ui_text(panel, "Porters", 20.0, Color::WHITE);
+            spawn_hud_text(panel, HudTextField::Porters);
+        });
+}
+
+fn spawn_help_reference_column(parent: &mut ChildSpawner) {
+    parent
+        .spawn((Node {
+            width: px(330),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexStart,
+            row_gap: px(3),
+            ..Default::default()
+        },))
+        .with_children(|panel| {
+            spawn_ui_text(panel, "Controls", 20.0, Color::WHITE);
+            for line in CONTROL_HINTS {
+                spawn_ui_text(panel, line, 16.0, Color::WHITE);
+            }
+            spawn_ui_spacer(panel, 10.0);
+            spawn_ui_text(panel, "Legend", 20.0, Color::WHITE);
+            for line in LEGEND_LINES {
+                spawn_ui_text(panel, line, 16.0, Color::WHITE);
+            }
+        });
 }
 
 fn draw_pause_menu(parent: &mut ChildSpawner, selected: PauseMenuEntry, status: Option<&str>) {
@@ -1271,12 +1310,14 @@ fn scene_part_entity(world: &mut World, key: SceneRenderKey) -> Option<Entity> {
 }
 
 fn set_sprite(world: &mut World, entity: Entity, render: SpriteRender) {
+    let dimensions = window_dimensions(world);
     if let Some(mut sprite) = world.get_mut::<Sprite>(entity) {
         sprite.color = render.color;
         sprite.custom_size = Some(Vec2::new(render.width, render.height));
     }
     if let Some(mut transform) = world.get_mut::<Transform>(entity) {
         transform.translation = screen_point_to_world(
+            dimensions,
             render.x + render.width / 2.0,
             render.y + render.height / 2.0,
             render.z,
@@ -1286,6 +1327,7 @@ fn set_sprite(world: &mut World, entity: Entity, render: SpriteRender) {
 }
 
 fn set_text(world: &mut World, entity: Entity, render: TextRender) {
+    let dimensions = window_dimensions(world);
     if let Some(mut text) = world.get_mut::<Text2d>(entity) {
         text.0 = render.text;
     }
@@ -1296,7 +1338,7 @@ fn set_text(world: &mut World, entity: Entity, render: TextRender) {
         color.0 = render.color;
     }
     if let Some(mut transform) = world.get_mut::<Transform>(entity) {
-        transform.translation = screen_point_to_world(render.x, render.y, render.z);
+        transform.translation = screen_point_to_world(dimensions, render.x, render.y, render.z);
     }
     set_visibility(world, entity, render.visible);
 }
@@ -1324,12 +1366,20 @@ fn despawn_stale_scene_parts(world: &mut World, live_parts: &HashSet<SceneRender
     }
 }
 
-fn screen_point_to_world(x: f32, y: f32, z: f32) -> Vec3 {
-    Vec3::new(
-        x - initial_window_width() as f32 / 2.0,
-        WINDOW_HEIGHT / 2.0 - y,
-        z,
-    )
+fn window_dimensions(world: &mut World) -> Vec2 {
+    let mut query = world.query_filtered::<&Window, With<PrimaryWindow>>();
+    query
+        .iter(world)
+        .next()
+        .map(|window| Vec2::new(window.resolution.width(), window.resolution.height()))
+        .unwrap_or(Vec2::new(
+            initial_window_width() as f32,
+            initial_window_height() as f32,
+        ))
+}
+
+fn screen_point_to_world(dimensions: Vec2, x: f32, y: f32, z: f32) -> Vec3 {
+    Vec3::new(x - dimensions.x / 2.0, dimensions.y / 2.0 - y, z)
 }
 
 #[cfg(test)]
@@ -1337,14 +1387,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retained_render_systems_spawn_world_and_ui_entities() {
+    fn retained_render_systems_spawn_world_without_default_hud() {
         let mut app = App::new();
         crate::world_setup::init_world(app.world_mut());
         app.init_resource::<MenuUiFingerprint>()
-            .add_systems(Startup, (spawn_scene_view, spawn_hud).chain())
+            .add_systems(Startup, spawn_scene_view)
             .add_systems(
                 Update,
-                (sync_rendered_scene, update_hud, sync_menu_ui).chain(),
+                (sync_rendered_scene, sync_menu_ui, update_hud).chain(),
             );
 
         app.update();
@@ -1357,12 +1407,32 @@ mod tests {
         let sprite_count = sprites.iter(app.world()).count();
         let mut nodes = app.world_mut().query::<&Node>();
         let node_count = nodes.iter(app.world()).count();
-        let mut texts = app.world_mut().query::<&Text>();
-        let text_count = texts.iter(app.world()).count();
 
         assert!(scene_part_count > 0);
         assert!(sprite_count > 0, "world scene should spawn sprite entities");
-        assert!(node_count > 0, "HUD should spawn Bevy UI nodes");
-        assert!(text_count > 0, "HUD should spawn Bevy UI text");
+        assert_eq!(node_count, 0, "HUD should not be visible by default");
+    }
+
+    #[test]
+    fn help_modal_spawns_hud_ui_on_demand() {
+        let mut app = App::new();
+        crate::world_setup::init_world(app.world_mut());
+        app.init_resource::<MenuUiFingerprint>()
+            .add_systems(Startup, spawn_scene_view)
+            .add_systems(
+                Update,
+                (sync_rendered_scene, sync_menu_ui, update_hud).chain(),
+            );
+
+        *app.world_mut().resource_mut::<GameScreen>() = GameScreen::HelpModal;
+        app.update();
+
+        let mut hud_roots = app.world_mut().query_filtered::<Entity, With<HudRoot>>();
+        let hud_root_count = hud_roots.iter(app.world()).count();
+        let mut texts = app.world_mut().query::<&Text>();
+        let text_count = texts.iter(app.world()).count();
+
+        assert_eq!(hud_root_count, 1);
+        assert!(text_count > 0, "help modal should spawn HUD text");
     }
 }

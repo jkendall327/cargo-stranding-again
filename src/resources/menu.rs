@@ -4,6 +4,7 @@ use bevy_ecs::prelude::*;
 pub enum GameScreen {
     #[default]
     Playing,
+    HelpModal,
     PauseMenu,
     InventoryMenu,
     OptionsMenu,

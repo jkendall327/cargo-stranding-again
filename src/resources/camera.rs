@@ -24,6 +24,13 @@ impl Camera {
         }
     }
 
+    /// Resizes the tile view before centering, so rendering can track the app
+    /// window without giving the sidebar permanent map space.
+    pub fn resize_tiles(&mut self, width: i32, height: i32) {
+        self.width = width.max(1);
+        self.height = height.max(1);
+    }
+
     /// Centers the camera on an ECS position while clamping to finite map bounds.
     pub fn center_on(&mut self, position: Position, bounds: MapBounds) {
         let coord = TileCoord::from(position);

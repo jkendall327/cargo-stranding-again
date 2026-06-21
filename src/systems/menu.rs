@@ -12,6 +12,12 @@ pub fn menu_navigation(world: &mut World) {
     };
 
     match (*world.resource::<GameScreen>(), action) {
+        (GameScreen::Playing, MenuAction::ToggleHelp) => {
+            *world.resource_mut::<GameScreen>() = GameScreen::HelpModal;
+        }
+        (GameScreen::HelpModal, MenuAction::ToggleHelp | MenuAction::Cancel) => {
+            *world.resource_mut::<GameScreen>() = GameScreen::Playing;
+        }
         (GameScreen::Playing, MenuAction::Cancel) => {
             *world.resource_mut::<GameScreen>() = GameScreen::PauseMenu;
         }

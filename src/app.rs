@@ -38,20 +38,15 @@ pub fn run() {
         .init_resource::<render::MenuUiFingerprint>()
         .add_systems(
             Startup,
-            (
-                render::setup_camera,
-                render::spawn_scene_view,
-                render::spawn_hud,
-            )
-                .chain(),
+            (render::setup_camera, render::spawn_scene_view).chain(),
         )
         .add_systems(
             Update,
             (
                 tick_game,
                 render::sync_rendered_scene,
-                render::update_hud,
                 render::sync_menu_ui,
+                render::update_hud,
             )
                 .chain(),
         )
