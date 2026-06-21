@@ -8,7 +8,7 @@ use super::{
     CharacterLoadError, CharacterSaveError, Save, SaveDirectoryError, SaveKind, WorldId,
     WorldLoadError, WorldSaveError,
 };
-use crate::{map::Map, world_setup};
+use crate::{cargo::Item, components::Actor, map::Map, world_setup};
 
 /// Stable IDs that choose the world and character roots for one save slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +99,54 @@ pub fn load_save_slot(
         },
         world,
     })
+}
+
+/// Loads a save slot into an existing ECS world.
+///
+/// Windowed Bevy owns one app world containing renderer/window resources, so it
+/// cannot replace the whole `World` on load. This helper clears only simulation
+/// entities and resources before rebuilding the saved runtime state in place.
+pub fn load_save_slot_into_world(
+    path: impl AsRef<Path>,
+    character_id: CharacterId,
+    world: &mut World,
+) -> Result<SaveSlotIds, SaveSlotError> {
+    let path = path.as_ref();
+    let world_save = read_world_directory(path).map_err(SaveSlotError::Directory)?;
+    let character_save =
+        read_character_file(path, character_id).map_err(SaveSlotError::Directory)?;
+
+    if character_save.payload.world_id != world_save.payload.world_id {
+        return Err(SaveSlotError::CharacterWorldMismatch {
+            world_id: world_save.payload.world_id,
+            character_world_id: character_save.payload.world_id,
+        });
+    }
+
+    despawn_simulation_entities(world);
+    world_setup::init_resources(world, Map::generate());
+
+    let player = spawn_saved_character_data(world, &character_save.payload)
+        .map_err(SaveSlotError::CharacterLoad)?;
+    let entity_by_id = HashMap::from([(character_save.payload.player.actor.id, player)]);
+    super::runtime::spawn_saved_world_data_with_entities(world, &world_save.payload, &entity_by_id)
+        .map_err(SaveSlotError::WorldLoad)?;
+    world_setup::reserve_existing_persistent_ids(world);
+
+    Ok(SaveSlotIds {
+        world_id: world_save.payload.world_id,
+        character_id,
+    })
+}
+
+fn despawn_simulation_entities(world: &mut World) {
+    let entities = {
+        let mut query = world.query_filtered::<Entity, Or<(With<Actor>, With<Item>)>>();
+        query.iter(world).collect::<Vec<_>>()
+    };
+    for entity in entities {
+        world.entity_mut(entity).despawn();
+    }
 }
 
 #[cfg(test)]

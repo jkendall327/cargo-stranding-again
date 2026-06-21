@@ -34,7 +34,10 @@ pub use runtime::{
     spawn_saved_loose_cargo, spawn_saved_world_data, CargoLoadError, CargoSaveError,
     CharacterLoadError, CharacterSaveError, WorldLoadError, WorldSaveError,
 };
-pub use slot::{load_save_slot, save_slot, LoadedSaveSlot, SaveSlotError, SaveSlotIds};
+pub use slot::{
+    load_save_slot, load_save_slot_into_world, save_slot, LoadedSaveSlot, SaveSlotError,
+    SaveSlotIds,
+};
 pub use storage::{
     read_character_file, read_world_directory, write_character_file, write_world_directory,
     SaveDirectoryError,

@@ -1,10 +1,9 @@
 use bevy::prelude::*;
-use bevy_ecs::prelude::{With, World as SimWorld};
+use bevy_ecs::prelude::{ChildSpawner, With};
 
 mod layout;
 mod view_model;
 
-use crate::app::Game;
 use crate::components::*;
 use crate::map::{Map, Terrain, TileCoord};
 use crate::render::layout::{
@@ -59,31 +58,31 @@ pub(crate) fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
 }
 
-pub(crate) fn sync_render(
-    mut commands: Commands,
-    mut game: ResMut<Game>,
-    rendered: Query<Entity, With<RenderedFrameEntity>>,
-) {
-    for entity in &rendered {
-        commands.entity(entity).despawn();
+pub(crate) fn sync_render(world: &mut World) {
+    let rendered = {
+        let mut query = world.query_filtered::<Entity, With<RenderedFrameEntity>>();
+        query.iter(world).collect::<Vec<_>>()
+    };
+    for entity in rendered {
+        world.entity_mut(entity).despawn();
     }
 
-    update_camera(game.world_mut());
-    let camera = *game.world().resource::<Camera>();
+    update_camera(world);
+    let camera = *world.resource::<Camera>();
 
-    draw_viewport_background(&mut commands, camera);
-    draw_map(&mut commands, game.world(), camera);
+    draw_viewport_background(world, camera);
+    draw_map(world, camera);
 
-    let loose_cargo = LooseCargoRender::all_from_world(game.world_mut());
-    let actor_cargo = ActorCargoRender::all_from_world(game.world_mut());
-    draw_loose_cargo(&mut commands, &loose_cargo, camera);
-    draw_porters(&mut commands, game.world_mut(), camera, &actor_cargo);
-    draw_player(&mut commands, game.world_mut(), camera, &actor_cargo);
-    draw_viewport_frame(&mut commands, camera);
-    draw_ui(&mut commands, game.world_mut(), camera);
+    let loose_cargo = LooseCargoRender::all_from_world(world);
+    let actor_cargo = ActorCargoRender::all_from_world(world);
+    draw_loose_cargo(world, &loose_cargo, camera);
+    draw_porters(world, camera, &actor_cargo);
+    draw_player(world, camera, &actor_cargo);
+    draw_viewport_frame(world, camera);
+    draw_ui(world, camera);
 }
 
-fn update_camera(world: &mut SimWorld) {
+fn update_camera(world: &mut World) {
     let player_position = {
         let mut query = world.query_filtered::<&Position, bevy_ecs::prelude::With<Player>>();
         query.iter(world).next().copied()
@@ -101,9 +100,9 @@ fn update_camera(world: &mut SimWorld) {
         .center_on(player_position, bounds);
 }
 
-fn draw_viewport_background(commands: &mut Commands, camera: Camera) {
+fn draw_viewport_background(world: &mut World, camera: Camera) {
     spawn_rect(
-        commands,
+        world,
         VIEWPORT_X - 4.0,
         VIEWPORT_Y - 4.0,
         viewport_width(camera) + 8.0,
@@ -113,9 +112,9 @@ fn draw_viewport_background(commands: &mut Commands, camera: Camera) {
     );
 }
 
-fn draw_viewport_frame(commands: &mut Commands, camera: Camera) {
+fn draw_viewport_frame(world: &mut World, camera: Camera) {
     draw_rect_outline(
-        commands,
+        world,
         VIEWPORT_X - 1.0,
         VIEWPORT_Y - 1.0,
         viewport_width(camera) + 2.0,
@@ -125,15 +124,23 @@ fn draw_viewport_frame(commands: &mut Commands, camera: Camera) {
     );
 }
 
-fn draw_map(commands: &mut Commands, world: &SimWorld, camera: Camera) {
-    let map = world.resource::<Map>();
-    for coord in map.visible_tiles(camera.origin_coord(), camera.width, camera.height) {
-        let tile = map
-            .tile_at_coord(coord)
-            .expect("visible tile iteration is in bounds");
+fn draw_map(world: &mut World, camera: Camera) {
+    let visible_tiles = {
+        let map = world.resource::<Map>();
+        map.visible_tiles(camera.origin_coord(), camera.width, camera.height)
+            .map(|coord| {
+                let tile = map
+                    .tile_at_coord(coord)
+                    .expect("visible tile iteration is in bounds");
+                (coord, tile)
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (coord, tile) in visible_tiles {
         let (px, py) = tile_to_screen(camera, coord);
         spawn_rect(
-            commands,
+            world,
             px,
             py,
             TILE_SIZE,
@@ -142,7 +149,7 @@ fn draw_map(commands: &mut Commands, world: &SimWorld, camera: Camera) {
             terrain_color(tile.terrain, tile.elevation, tile.water_depth),
         );
         draw_rect_outline(
-            commands,
+            world,
             px,
             py,
             TILE_SIZE,
@@ -152,7 +159,7 @@ fn draw_map(commands: &mut Commands, world: &SimWorld, camera: Camera) {
         );
 
         spawn_text(
-            commands,
+            world,
             &tile.elevation.to_string(),
             px + 1.5,
             py + 7.0,
@@ -163,7 +170,7 @@ fn draw_map(commands: &mut Commands, world: &SimWorld, camera: Camera) {
 
         if tile.water_depth > 0 {
             spawn_text(
-                commands,
+                world,
                 &tile.water_depth.to_string(),
                 px + 10.0,
                 py + 14.0,
@@ -173,7 +180,7 @@ fn draw_map(commands: &mut Commands, world: &SimWorld, camera: Camera) {
             );
         } else if matches!(tile.terrain.glyph(), 'D' | '^') {
             spawn_text(
-                commands,
+                world,
                 &tile.terrain.glyph().to_string(),
                 px + 4.0,
                 py + 12.5,
@@ -210,7 +217,7 @@ fn shade_color(color: Color, amount: f32) -> Color {
     )
 }
 
-fn draw_loose_cargo(commands: &mut Commands, cargo: &[LooseCargoRender], camera: Camera) {
+fn draw_loose_cargo(world: &mut World, cargo: &[LooseCargoRender], camera: Camera) {
     for item in cargo {
         if !camera.contains(item.position) {
             continue;
@@ -226,12 +233,12 @@ fn draw_loose_cargo(commands: &mut Commands, cargo: &[LooseCargoRender], camera:
                 porter_id.map(|id| format!("P{id}")),
             ),
         };
-        spawn_rect(commands, cx - 5.0, cy - 5.0, 10.0, 10.0, 10.0, color);
+        spawn_rect(world, cx - 5.0, cy - 5.0, 10.0, 10.0, 10.0, color);
         if let Some(outline) = outline {
-            draw_rect_outline(commands, cx - 6.5, cy - 6.5, 13.0, 13.0, 2.0, outline);
+            draw_rect_outline(world, cx - 6.5, cy - 6.5, 13.0, 13.0, 2.0, outline);
         }
         spawn_text(
-            commands,
+            world,
             &format!("{:.0}", item.weight),
             cx - 4.0,
             cy + 4.0,
@@ -240,25 +247,12 @@ fn draw_loose_cargo(commands: &mut Commands, cargo: &[LooseCargoRender], camera:
             Color::BLACK,
         );
         if let Some(label) = label {
-            spawn_text(
-                commands,
-                &label,
-                px + 1.0,
-                py - 1.0,
-                10.0,
-                12.0,
-                Color::WHITE,
-            );
+            spawn_text(world, &label, px + 1.0, py - 1.0, 10.0, 12.0, Color::WHITE);
         }
     }
 }
 
-fn draw_porters(
-    commands: &mut Commands,
-    world: &mut SimWorld,
-    camera: Camera,
-    actor_cargo: &[ActorCargoRender],
-) {
+fn draw_porters(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRender]) {
     let mut query = world.query::<(bevy_ecs::prelude::Entity, &Position, &Porter, &AssignedJob)>();
     let porters = query
         .iter(world)
@@ -278,10 +272,10 @@ fn draw_porters(
         } else {
             color_rgba(80, 210, 170, 255)
         };
-        spawn_rect(commands, px + 3.0, py + 3.0, 10.0, 10.0, 15.0, color);
-        draw_rect_outline(commands, px + 2.0, py + 2.0, 12.0, 12.0, 1.5, Color::WHITE);
+        spawn_rect(world, px + 3.0, py + 3.0, 10.0, 10.0, 15.0, color);
+        draw_rect_outline(world, px + 2.0, py + 2.0, 12.0, 12.0, 1.5, Color::WHITE);
         spawn_text(
-            commands,
+            world,
             &format!("P{porter_id}"),
             px + 1.0,
             py + 13.0,
@@ -296,41 +290,32 @@ fn draw_porters(
             JobPhase::GoToDepot => "D",
             JobPhase::Done => "!",
         };
-        spawn_text(
-            commands,
-            label,
-            px + 10.0,
-            py + 7.0,
-            10.0,
-            16.0,
-            Color::WHITE,
-        );
+        spawn_text(world, label, px + 10.0, py + 7.0, 10.0, 16.0, Color::WHITE);
         if let Some(cargo) = carried {
-            draw_actor_cargo_badge(commands, px, py, cargo);
+            draw_actor_cargo_badge(world, px, py, cargo);
         }
     }
 }
 
-fn draw_player(
-    commands: &mut Commands,
-    world: &mut SimWorld,
-    camera: Camera,
-    actor_cargo: &[ActorCargoRender],
-) {
-    let mut query = world.query_filtered::<(
-        bevy_ecs::prelude::Entity,
-        &Position,
-        &Stamina,
-        &MovementState,
-        &Momentum,
-    ), bevy_ecs::prelude::With<Player>>();
-    let Some((entity, position, stamina, movement_state, _momentum)) = query.iter(world).next()
-    else {
+fn draw_player(world: &mut World, camera: Camera, actor_cargo: &[ActorCargoRender]) {
+    let player = {
+        let mut query = world.query_filtered::<(
+            bevy_ecs::prelude::Entity,
+            &Position,
+            &Stamina,
+            &MovementState,
+            &Momentum,
+        ), bevy_ecs::prelude::With<Player>>();
+        query
+            .iter(world)
+            .next()
+            .map(|(entity, position, stamina, movement_state, _momentum)| {
+                (entity, *position, *stamina, *movement_state)
+            })
+    };
+    let Some((entity, position, stamina, movement_state)) = player else {
         return;
     };
-    let position = *position;
-    let stamina = *stamina;
-    let movement_state = *movement_state;
     if !camera.contains(position) {
         return;
     }
@@ -342,7 +327,7 @@ fn draw_player(
         crate::movement::MovementMode::Steady => color_rgba(117, 205, 188, 255),
     };
     spawn_rect(
-        commands,
+        world,
         px + 2.0,
         py + 2.0,
         TILE_SIZE - 4.0,
@@ -351,7 +336,7 @@ fn draw_player(
         player_color,
     );
     spawn_text(
-        commands,
+        world,
         "@",
         px + 3.0,
         py + 14.0,
@@ -362,7 +347,7 @@ fn draw_player(
 
     let stamina_ratio = stamina.current / stamina.max;
     spawn_rect(
-        commands,
+        world,
         px,
         py - 4.0,
         TILE_SIZE,
@@ -371,7 +356,7 @@ fn draw_player(
         color_rgba(60, 20, 20, 255),
     );
     spawn_rect(
-        commands,
+        world,
         px,
         py - 4.0,
         TILE_SIZE * stamina_ratio,
@@ -385,11 +370,11 @@ fn draw_player(
         .find(|cargo| cargo.holder == entity)
         .filter(|cargo| matches!(cargo.holder_kind, CargoHolderKind::Player))
     {
-        draw_actor_cargo_badge(commands, px, py, cargo);
+        draw_actor_cargo_badge(world, px, py, cargo);
     }
 }
 
-fn draw_actor_cargo_badge(commands: &mut Commands, px: f32, py: f32, cargo: &ActorCargoRender) {
+fn draw_actor_cargo_badge(world: &mut World, px: f32, py: f32, cargo: &ActorCargoRender) {
     let badge_color = if cargo.has_contained_items {
         color_rgba(116, 205, 239, 255)
     } else {
@@ -401,7 +386,7 @@ fn draw_actor_cargo_badge(commands: &mut Commands, px: f32, py: f32, cargo: &Act
         format!("{:.0}", cargo.total_weight)
     };
     spawn_rect(
-        commands,
+        world,
         px + 9.0,
         py,
         8.0,
@@ -409,29 +394,23 @@ fn draw_actor_cargo_badge(commands: &mut Commands, px: f32, py: f32, cargo: &Act
         25.0,
         color_rgba(12, 14, 16, 235),
     );
-    spawn_rect(commands, px + 10.0, py + 1.0, 6.0, 6.0, 26.0, badge_color);
-    spawn_text(
-        commands,
-        &label,
-        px + 10.0,
-        py + 7.0,
-        8.0,
-        27.0,
-        Color::BLACK,
-    );
+    spawn_rect(world, px + 10.0, py + 1.0, 6.0, 6.0, 26.0, badge_color);
+    spawn_text(world, &label, px + 10.0, py + 7.0, 8.0, 27.0, Color::BLACK);
 }
 
-fn draw_ui(commands: &mut Commands, world: &mut SimWorld, camera: Camera) {
+fn draw_ui(world: &mut World, camera: Camera) {
     let screen = *world.resource::<GameScreen>();
     let pause_menu = *world.resource::<PauseMenuState>();
     let persistence_status = world.resource::<PersistenceStatus>().clone();
+    let hud = PlayerHudSnapshot::from_world(world, camera);
+    let porter_rows = PorterDebugRow::all_from_world(world);
     let inventory_entries = if screen == GameScreen::InventoryMenu {
         InventoryEntry::all_from_world(world)
     } else {
         Vec::new()
     };
 
-    commands
+    world
         .spawn((
             RenderedFrameEntity,
             Node {
@@ -445,7 +424,7 @@ fn draw_ui(commands: &mut Commands, world: &mut SimWorld, camera: Camera) {
             GlobalZIndex(10),
         ))
         .with_children(|parent| {
-            draw_hud(parent, world, camera);
+            draw_hud(parent, hud, &porter_rows, camera);
             match screen {
                 GameScreen::Playing => {}
                 GameScreen::PauseMenu => {
@@ -461,11 +440,15 @@ fn draw_ui(commands: &mut Commands, world: &mut SimWorld, camera: Camera) {
         });
 }
 
-fn draw_hud(parent: &mut ChildSpawnerCommands, world: &mut SimWorld, camera: Camera) {
-    let Some(hud) = PlayerHudSnapshot::from_world(world, camera) else {
+fn draw_hud(
+    parent: &mut ChildSpawner,
+    hud: Option<PlayerHudSnapshot>,
+    porter_rows: &[PorterDebugRow],
+    camera: Camera,
+) {
+    let Some(hud) = hud else {
         return;
     };
-    let porter_rows = PorterDebugRow::all_from_world(world);
     let panel_x = ui_x(camera);
 
     parent
@@ -601,11 +584,7 @@ fn draw_hud(parent: &mut ChildSpawnerCommands, world: &mut SimWorld, camera: Cam
         });
 }
 
-fn draw_pause_menu(
-    parent: &mut ChildSpawnerCommands,
-    menu: PauseMenuState,
-    status: &PersistenceStatus,
-) {
+fn draw_pause_menu(parent: &mut ChildSpawner, menu: PauseMenuState, status: &PersistenceStatus) {
     spawn_modal(parent, 560.0, 360.0, |panel| {
         spawn_ui_text(panel, "Paused", 34.0, Color::WHITE);
         spawn_ui_spacer(panel, 18.0);
@@ -619,7 +598,7 @@ fn draw_pause_menu(
     });
 }
 
-fn draw_inventory_menu(parent: &mut ChildSpawnerCommands, entries: &[InventoryEntry]) {
+fn draw_inventory_menu(parent: &mut ChildSpawner, entries: &[InventoryEntry]) {
     spawn_modal(parent, 460.0, 360.0, |panel| {
         spawn_ui_text(panel, "Inventory", 34.0, Color::WHITE);
         spawn_ui_spacer(panel, 18.0);
@@ -640,7 +619,7 @@ fn draw_inventory_menu(parent: &mut ChildSpawnerCommands, entries: &[InventoryEn
     });
 }
 
-fn draw_options_menu(parent: &mut ChildSpawnerCommands) {
+fn draw_options_menu(parent: &mut ChildSpawner) {
     spawn_modal(parent, 420.0, 250.0, |panel| {
         spawn_ui_text(panel, "Options", 34.0, Color::WHITE);
         spawn_ui_spacer(panel, 20.0);
@@ -654,10 +633,10 @@ fn draw_options_menu(parent: &mut ChildSpawnerCommands) {
 }
 
 fn spawn_modal(
-    parent: &mut ChildSpawnerCommands,
+    parent: &mut ChildSpawner,
     width: f32,
     height: f32,
-    children: impl FnOnce(&mut ChildSpawnerCommands),
+    children: impl FnOnce(&mut ChildSpawner),
 ) {
     parent
         .spawn((
@@ -696,7 +675,7 @@ fn spawn_modal(
         });
 }
 
-fn spawn_menu_entry(parent: &mut ChildSpawnerCommands, label: &str, selected: bool) {
+fn spawn_menu_entry(parent: &mut ChildSpawner, label: &str, selected: bool) {
     let color = if selected {
         color_rgba(252, 204, 84, 255)
     } else {
@@ -720,12 +699,7 @@ fn spawn_menu_entry(parent: &mut ChildSpawnerCommands, label: &str, selected: bo
         });
 }
 
-fn spawn_ui_text(
-    parent: &mut ChildSpawnerCommands,
-    text: impl Into<String>,
-    font_size: f32,
-    color: Color,
-) {
+fn spawn_ui_text(parent: &mut ChildSpawner, text: impl Into<String>, font_size: f32, color: Color) {
     parent.spawn((
         RenderedFrameEntity,
         Text::new(text),
@@ -741,7 +715,7 @@ fn spawn_ui_text(
     ));
 }
 
-fn spawn_ui_spacer(parent: &mut ChildSpawnerCommands, height: f32) {
+fn spawn_ui_spacer(parent: &mut ChildSpawner, height: f32) {
     parent.spawn((
         RenderedFrameEntity,
         Node {
@@ -752,7 +726,7 @@ fn spawn_ui_spacer(parent: &mut ChildSpawnerCommands, height: f32) {
 }
 
 fn draw_rect_outline(
-    commands: &mut Commands,
+    world: &mut World,
     x: f32,
     y: f32,
     width: f32,
@@ -760,9 +734,9 @@ fn draw_rect_outline(
     thickness: f32,
     color: Color,
 ) {
-    spawn_rect(commands, x, y, width, thickness, 50.0, color);
+    spawn_rect(world, x, y, width, thickness, 50.0, color);
     spawn_rect(
-        commands,
+        world,
         x,
         y + height - thickness,
         width,
@@ -770,9 +744,9 @@ fn draw_rect_outline(
         50.0,
         color,
     );
-    spawn_rect(commands, x, y, thickness, height, 50.0, color);
+    spawn_rect(world, x, y, thickness, height, 50.0, color);
     spawn_rect(
-        commands,
+        world,
         x + width - thickness,
         y,
         thickness,
@@ -782,16 +756,8 @@ fn draw_rect_outline(
     );
 }
 
-fn spawn_rect(
-    commands: &mut Commands,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    z: f32,
-    color: Color,
-) {
-    commands.spawn((
+fn spawn_rect(world: &mut World, x: f32, y: f32, width: f32, height: f32, z: f32, color: Color) {
+    world.spawn((
         RenderedFrameEntity,
         Sprite {
             color,
@@ -802,16 +768,8 @@ fn spawn_rect(
     ));
 }
 
-fn spawn_text(
-    commands: &mut Commands,
-    text: &str,
-    x: f32,
-    y: f32,
-    font_size: f32,
-    z: f32,
-    color: Color,
-) {
-    commands.spawn((
+fn spawn_text(world: &mut World, text: &str, x: f32, y: f32, font_size: f32, z: f32, color: Color) {
+    world.spawn((
         RenderedFrameEntity,
         Text2d::new(text),
         TextFont {
@@ -838,8 +796,8 @@ mod tests {
     #[test]
     fn render_sync_spawns_world_and_ui_entities() {
         let mut app = App::new();
-        app.insert_resource(Game::new())
-            .add_systems(Update, sync_render);
+        crate::world_setup::init_world(app.world_mut());
+        app.add_systems(Update, sync_render);
 
         app.update();
 
