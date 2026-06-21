@@ -13,9 +13,10 @@ pub struct CargoStats {
     pub volume: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum CarrySlot {
     /// Primary back carry point for loose parcels and future backpacks.
+    #[default]
     Back,
     /// Body-worn starter load that leaves the back slot available for parcels.
     Chest,
@@ -28,10 +29,20 @@ pub enum CargoTarget {
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[relationship(relationship_target = CarriedItems)]
 pub struct CarriedBy {
+    #[relationship]
     pub holder: Entity,
     pub slot: CarrySlot,
 }
+
+/// Maintained by Bevy for every actor with items carrying `CarriedBy`.
+///
+/// Inventory-style reads should prefer this target over scanning all cargo
+/// entities and filtering by holder by hand.
+#[derive(Component, Clone, Debug)]
+#[relationship_target(relationship = CarriedBy)]
+pub struct CarriedItems(Vec<Entity>);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Container {
@@ -130,32 +141,15 @@ pub struct ContainedLoad {
 
 /// Lists parcel cargo currently carried by a holder, independent of slot.
 pub fn carried_parcels(world: &mut World, holder: Entity) -> Vec<CarriedParcelEntry> {
-    let carried_containers = carried_containers(world, holder);
-    let mut parcel_query = world.query::<(
-        Entity,
-        &CargoParcel,
-        &CargoStats,
-        Option<&CarriedBy>,
-        Option<&ContainedIn>,
-    )>();
-    let mut parcels = parcel_query
-        .iter(world)
-        .filter_map(|(entity, _, stats, carried_by, contained_in)| {
-            let carried_directly = carried_by.is_some_and(|carried_by| carried_by.holder == holder);
-            let carried_in_container = contained_in
-                .is_some_and(|contained_in| carried_containers.contains(&contained_in.container));
-            if carried_directly || carried_in_container {
-                Some(CarriedParcelEntry {
-                    entity,
-                    weight: stats.weight,
-                })
-            } else {
-                None
-            }
+    carried_items(world, holder)
+        .into_iter()
+        .filter_map(|entry| {
+            entry.is_parcel.then_some(CarriedParcelEntry {
+                entity: entry.entity,
+                weight: entry.weight,
+            })
         })
-        .collect::<Vec<_>>();
-    parcels.sort_by_key(|entry| entry.entity.to_bits());
-    parcels
+        .collect::<Vec<_>>()
 }
 
 pub fn carried_parcel_count(world: &mut World, holder: Entity) -> usize {
@@ -199,38 +193,53 @@ pub fn player_carried_item_count(world: &mut World) -> usize {
 /// Inventory and dropping should use this rather than parcel-only queries so
 /// delivery state does not accidentally define what the player can hold.
 pub fn carried_items(world: &mut World, holder: Entity) -> Vec<CarriedItemEntry> {
-    let carried_containers = carried_containers(world, holder);
-    let mut item_query = world.query::<(
-        Entity,
-        &CargoStats,
-        Option<&CarriedBy>,
-        Option<&ContainedIn>,
-        Option<&CargoParcel>,
-    )>();
-    let mut items = item_query
-        .iter(world)
-        .filter_map(|(entity, stats, carried_by, contained_in, parcel)| {
-            if let Some(carried_by) = carried_by.filter(|carried_by| carried_by.holder == holder) {
-                return Some(CarriedItemEntry {
-                    entity,
-                    weight: stats.weight,
-                    volume: stats.volume,
-                    location: CarriedItemLocation::Slot(carried_by.slot),
-                    is_parcel: parcel.is_some(),
-                });
-            }
+    let direct_items = carried_item_entities(world, holder);
+    let carried_containers = direct_items
+        .iter()
+        .copied()
+        .filter(|entity| world.get::<Container>(*entity).is_some())
+        .collect::<Vec<_>>();
 
-            let contained_in = contained_in
-                .filter(|contained_in| carried_containers.contains(&contained_in.container))?;
-            Some(CarriedItemEntry {
+    let mut items = Vec::new();
+    for entity in direct_items {
+        let Some((stats, carried_by)) = world
+            .get::<CargoStats>(entity)
+            .zip(world.get::<CarriedBy>(entity))
+        else {
+            continue;
+        };
+        debug_assert_eq!(carried_by.holder, holder);
+        items.push(CarriedItemEntry {
+            entity,
+            weight: stats.weight,
+            volume: stats.volume,
+            location: CarriedItemLocation::Slot(carried_by.slot),
+            is_parcel: world.get::<CargoParcel>(entity).is_some(),
+        });
+    }
+
+    for container in carried_containers {
+        let contained_items = contained_item_entities(world, container);
+        for entity in contained_items {
+            let Some(stats) = world.get::<CargoStats>(entity) else {
+                continue;
+            };
+            debug_assert_eq!(
+                world
+                    .get::<ContainedIn>(entity)
+                    .map(|contained_in| contained_in.container),
+                Some(container)
+            );
+            items.push(CarriedItemEntry {
                 entity,
                 weight: stats.weight,
                 volume: stats.volume,
-                location: CarriedItemLocation::Container(contained_in.container),
-                is_parcel: parcel.is_some(),
-            })
-        })
-        .collect::<Vec<_>>();
+                location: CarriedItemLocation::Container(container),
+                is_parcel: world.get::<CargoParcel>(entity).is_some(),
+            });
+        }
+    }
+
     items.sort_by_key(|entry| entry.entity.to_bits());
     items
 }
@@ -325,12 +334,18 @@ fn player_entity(world: &mut World) -> Option<Entity> {
     player_query.iter(world).next()
 }
 
-fn carried_containers(world: &mut World, holder: Entity) -> Vec<Entity> {
-    let mut container_query = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
-    container_query
-        .iter(world)
-        .filter_map(|(entity, carried_by)| (carried_by.holder == holder).then_some(entity))
-        .collect()
+fn carried_item_entities(world: &World, holder: Entity) -> Vec<Entity> {
+    world
+        .get::<CarriedItems>(holder)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default()
+}
+
+fn contained_item_entities(world: &World, container: Entity) -> Vec<Entity> {
+    world
+        .get::<ContainerContents>(container)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -449,6 +464,12 @@ mod tests {
         assert_eq!(
             world.get::<CarriedBy>(parcel).map(|carried| carried.holder),
             Some(holder)
+        );
+        assert_eq!(
+            world
+                .get::<CarriedItems>(holder)
+                .map(|items| items.iter().collect::<Vec<_>>()),
+            Some(vec![parcel])
         );
         assert_eq!(
             *world

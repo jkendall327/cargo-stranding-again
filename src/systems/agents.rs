@@ -2,8 +2,8 @@ use bevy_ecs::prelude::*;
 
 use crate::ai::pathing::first_step_toward;
 use crate::cargo::{
-    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarrySlot, ContainedIn, Container,
-    ParcelDelivery,
+    derived_load, Cargo, CargoParcel, CargoTarget, CarriedBy, CarriedItems, CarrySlot,
+    ContainedIn, Container, ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::{ActionEnergy, DEFAULT_ACTION_ENERGY_COST};
@@ -151,11 +151,12 @@ pub fn porter_jobs(world: &mut World) {
     }
 }
 
-fn carried_container_target(world: &mut World, actor: Entity) -> CargoTarget {
-    let mut query = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
-    query
-        .iter(world)
-        .filter_map(|(entity, carried_by)| (carried_by.holder == actor).then_some(entity))
+fn carried_container_target(world: &World, actor: Entity) -> CargoTarget {
+    world
+        .get::<CarriedItems>(actor)
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter(|entity| world.get::<Container>(*entity).is_some())
         .min_by_key(|entity| entity.to_bits())
         .map_or(CargoTarget::Slot(CarrySlot::Back), CargoTarget::Container)
 }

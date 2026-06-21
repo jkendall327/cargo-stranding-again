@@ -4,8 +4,8 @@ use crate::cargo::Cargo;
 use std::collections::HashMap;
 
 use crate::cargo::{
-    derived_load, player_carried_items, CargoParcel, CargoStats, CarriedBy, ContainedIn, Container,
-    Item, ParcelDelivery,
+    derived_load, player_carried_items, CargoParcel, CargoStats, CarriedBy, CarriedItems,
+    ContainedIn, Container, ContainerContents, Item, ParcelDelivery,
 };
 use crate::components::{
     AssignedJob, JobPhase, Momentum, MovementState, Player, Porter, Position, Stamina,
@@ -206,43 +206,10 @@ struct ActorCargoAccumulator {
 impl ActorCargoRender {
     pub fn all_from_world(world: &mut World) -> Vec<Self> {
         let holders = cargo_holders_by_entity(world);
-        let carried_containers = carried_containers_by_entity(world);
         let mut accumulators = HashMap::<Entity, ActorCargoAccumulator>::new();
 
-        {
-            let mut direct_query =
-                world.query::<(Entity, &Item, &CargoStats, &CarriedBy, Option<&CargoParcel>)>();
-            for (_, _, stats, carried_by, parcel) in direct_query.iter(world) {
-                if !holders.contains_key(&carried_by.holder) {
-                    continue;
-                }
-                let entry = accumulators.entry(carried_by.holder).or_default();
-                entry.item_count += 1;
-                entry.total_weight += stats.weight;
-                if parcel.is_some() {
-                    entry.parcel_count += 1;
-                }
-            }
-        }
-
-        {
-            let mut contained_query =
-                world.query::<(&Item, &CargoStats, &ContainedIn, Option<&CargoParcel>)>();
-            for (_, stats, contained_in, parcel) in contained_query.iter(world) {
-                let Some(holder) = carried_containers.get(&contained_in.container).copied() else {
-                    continue;
-                };
-                if !holders.contains_key(&holder) {
-                    continue;
-                }
-                let entry = accumulators.entry(holder).or_default();
-                entry.item_count += 1;
-                entry.total_weight += stats.weight;
-                entry.has_contained_items = true;
-                if parcel.is_some() {
-                    entry.parcel_count += 1;
-                }
-            }
+        for holder in holders.keys().copied() {
+            accumulate_holder_cargo(world, holder, &mut accumulators);
         }
 
         let mut cargo = accumulators
@@ -262,6 +229,50 @@ impl ActorCargoRender {
             .collect::<Vec<_>>();
         cargo.sort_by_key(|entry| entry.holder.to_bits());
         cargo
+    }
+}
+
+fn accumulate_holder_cargo(
+    world: &World,
+    holder: Entity,
+    accumulators: &mut HashMap<Entity, ActorCargoAccumulator>,
+) {
+    let Some(carried_items) = world.get::<CarriedItems>(holder) else {
+        return;
+    };
+    let direct_items = carried_items.iter().collect::<Vec<_>>();
+    for entity in direct_items.iter().copied() {
+        accumulate_item(world, holder, entity, false, accumulators);
+    }
+    for container in direct_items {
+        if world.get::<Container>(container).is_none() {
+            continue;
+        }
+        let Some(contents) = world.get::<ContainerContents>(container) else {
+            continue;
+        };
+        for entity in contents.iter() {
+            accumulate_item(world, holder, entity, true, accumulators);
+        }
+    }
+}
+
+fn accumulate_item(
+    world: &World,
+    holder: Entity,
+    entity: Entity,
+    contained: bool,
+    accumulators: &mut HashMap<Entity, ActorCargoAccumulator>,
+) {
+    let Some((_, stats)) = world.get::<Item>(entity).zip(world.get::<CargoStats>(entity)) else {
+        return;
+    };
+    let entry = accumulators.entry(holder).or_default();
+    entry.item_count += 1;
+    entry.total_weight += stats.weight;
+    entry.has_contained_items |= contained;
+    if world.get::<CargoParcel>(entity).is_some() {
+        entry.parcel_count += 1;
     }
 }
 
@@ -364,14 +375,6 @@ fn cargo_holders_by_entity(world: &mut World) -> HashMap<Entity, CargoHolderSnap
                 },
             ))
         })
-        .collect()
-}
-
-fn carried_containers_by_entity(world: &mut World) -> HashMap<Entity, Entity> {
-    let mut query = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
-    query
-        .iter(world)
-        .map(|(container, carried_by)| (container, carried_by.holder))
         .collect()
 }
 

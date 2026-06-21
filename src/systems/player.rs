@@ -4,8 +4,8 @@ mod cargo;
 mod movement;
 
 use crate::cargo::{
-    derived_load, Cargo, CargoStats, CargoTarget, CarriedBy, ContainedIn, Container, Item,
-    ParcelDelivery,
+    derived_load, Cargo, CargoStats, CargoTarget, CarriedBy, CarriedItems, ContainedIn, Container,
+    ContainerContents, Item, ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -43,57 +43,67 @@ pub fn open_inventory_from_player_intent(
     timeline: Res<EnergyTimeline>,
     mut screen: ResMut<GameScreen>,
     mut inventory_menu: ResMut<InventoryMenuState>,
-    player: Single<(Entity, &ActionEnergy), With<Player>>,
-    carried_items: Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoStats>>,
-    containers: Query<&CarriedBy, With<Container>>,
+    player: Single<(&ActionEnergy, Option<&CarriedItems>), With<Player>>,
+    cargo_items: Query<(), With<CargoStats>>,
+    containers: Query<&ContainerContents, With<Container>>,
 ) {
     let Some(PlayerAction::OpenInventory) = intent.action else {
         return;
     };
 
-    let (player_entity, energy) = player.into_inner();
+    let (energy, carried_items) = player.into_inner();
     if !energy.is_ready(timeline.now) {
         return;
     }
 
-    let carried_count = carried_items
-        .iter()
-        .filter(|(carried_by, contained_in)| {
-            item_carried_by_actor(*carried_by, *contained_in, &containers, player_entity)
-        })
-        .count();
+    let carried_count = carried_item_count(carried_items, &cargo_items, &containers);
     inventory_menu.clamp_to_item_count(carried_count);
     *screen = GameScreen::InventoryMenu;
     tracing::debug!(carried_count, "opened inventory");
 }
 
-fn item_carried_by_actor(
-    carried_by: Option<&CarriedBy>,
-    contained_in: Option<&ContainedIn>,
-    containers: &Query<&CarriedBy, With<Container>>,
-    actor: Entity,
-) -> bool {
-    carried_by.is_some_and(|carried_by| carried_by.holder == actor)
-        || contained_in.is_some_and(|contained_in| {
-            containers
-                .get(contained_in.container)
-                .is_ok_and(|carried_by| carried_by.holder == actor)
-        })
+fn carried_item_count(
+    carried_items: Option<&CarriedItems>,
+    cargo_items: &Query<(), With<CargoStats>>,
+    containers: &Query<&ContainerContents, With<Container>>,
+) -> usize {
+    carried_items
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter(|entity| cargo_items.contains(*entity))
+        .count()
+        + carried_items
+            .into_iter()
+            .flat_map(|items| items.iter())
+            .filter_map(|entity| containers.get(entity).ok())
+            .flat_map(|items| items.iter())
+            .filter(|entity| cargo_items.contains(*entity))
+            .count()
 }
 
 pub fn pick_up_player_item_from_intent(
     intent: Res<PlayerIntent>,
     timeline: Res<EnergyTimeline>,
-    player: Single<(Entity, &Position, &mut Velocity, &ActionEnergy), With<Player>>,
+    player: Single<
+        (
+            Entity,
+            &Position,
+            &mut Velocity,
+            &ActionEnergy,
+            Option<&CarriedItems>,
+        ),
+        With<Player>,
+    >,
     items: Query<PlayerPickupItem, PlayerPickupFilter>,
-    containers: Query<(Entity, &CarriedBy), With<Container>>,
+    containers: Query<(), With<Container>>,
     mut pickup_requests: MessageWriter<PickUpRequest>,
 ) {
     let Some(PlayerAction::PickUp) = intent.action else {
         return;
     };
 
-    let (player_entity, player_position, mut velocity, energy) = player.into_inner();
+    let (player_entity, player_position, mut velocity, energy, carried_items) =
+        player.into_inner();
     if !energy.is_ready(timeline.now) {
         return;
     }
@@ -115,7 +125,7 @@ pub fn pick_up_player_item_from_intent(
     pickup_requests.write(PickUpRequest {
         actor: player_entity,
         item: item_entity,
-        target: carried_container_target(player_entity, &containers),
+        target: carried_container_target(carried_items, &containers),
     });
     tracing::debug!(
         x = player_position.x,
@@ -130,12 +140,13 @@ fn parcel_can_be_picked_up_by_player(parcel_state: Option<&ParcelDelivery>) -> b
 }
 
 fn carried_container_target(
-    actor: Entity,
-    containers: &Query<(Entity, &CarriedBy), With<Container>>,
+    carried_items: Option<&CarriedItems>,
+    containers: &Query<(), With<Container>>,
 ) -> CargoTarget {
-    containers
-        .iter()
-        .filter_map(|(entity, carried_by)| (carried_by.holder == actor).then_some(entity))
+    carried_items
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter(|entity| containers.contains(*entity))
         .min_by_key(|entity| entity.to_bits())
         .map_or(
             CargoTarget::Slot(crate::cargo::CarrySlot::Back),
