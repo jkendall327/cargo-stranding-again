@@ -135,15 +135,11 @@ impl HeadlessSnapshot {
             Option<&CarriedBy>,
             Option<&ContainedIn>,
         ), With<CargoParcel>>();
-        let mut containers = world.query_filtered::<(Entity, &CarriedBy), With<Container>>();
-        let carried_containers = containers
-            .iter(world)
-            .map(|(container, _)| container)
-            .collect::<Vec<_>>();
+        let mut containers = world.query_filtered::<&CarriedBy, With<Container>>();
         for (delivery, position, carried_by, contained_in) in parcel_query.iter(world) {
             if carried_by.is_some()
                 || contained_in.is_some_and(|contained_in| {
-                    carried_containers.contains(&contained_in.container)
+                    containers.get(world, contained_in.container).is_ok()
                 })
             {
                 carried_parcels += 1;

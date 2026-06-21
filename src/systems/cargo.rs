@@ -4,9 +4,10 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 
 use crate::cargo::{
-    actor_loads_from_relationships, container_loads_from_relationships, Cargo, CargoError,
-    CargoStats, CargoTarget, CarriedBy, CarrySlot, ContainedIn, ContainedLoad, Container,
-    ContainerLoad, DirectCarryLoad, Item, ParcelDelivery,
+    actor_loads_from_relationships, carried_cargo_count, container_loads_from_relationships, Cargo,
+    CargoError, CargoStats, CargoTarget, CarriedBy, CarriedItems, CarrySlot, ContainedIn,
+    ContainedLoad, Container, ContainerContents, ContainerLoad, DirectCarryLoad, Item,
+    ParcelDelivery,
 };
 use crate::components::{ActionEnergy, AssignedJob, Player, Porter, Position};
 use crate::energy::ITEM_ACTION_ENERGY_COST;
@@ -232,7 +233,7 @@ pub fn clear_failed_porter_cargo_jobs(
     mut jobs: Query<&mut AssignedJob, With<Porter>>,
 ) {
     for event in results.read() {
-        if event.result.is_err() && jobs.get_mut(event.actor).is_ok() {
+        if event.result.is_err() {
             clear_failed_porter_job(event, &mut jobs);
         }
     }
@@ -240,9 +241,9 @@ pub fn clear_failed_porter_cargo_jobs(
 
 pub fn clamp_inventory_after_cargo_drop(
     mut results: MessageReader<CargoActionResult>,
-    players: Query<(), With<Player>>,
-    carried_items: Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoStats>>,
-    containers: Query<&CarriedBy, With<Container>>,
+    players: Query<Option<&CarriedItems>, With<Player>>,
+    cargo_items: Query<(), With<CargoStats>>,
+    containers: Query<&ContainerContents, With<Container>>,
     mut inventory_menu: ResMut<InventoryMenuState>,
 ) {
     for event in results.read() {
@@ -250,7 +251,7 @@ pub fn clamp_inventory_after_cargo_drop(
             clamp_player_inventory_after_drop(
                 event,
                 &players,
-                &carried_items,
+                &cargo_items,
                 &containers,
                 &mut inventory_menu,
             );
@@ -499,36 +500,18 @@ fn clear_failed_porter_job(
 
 fn clamp_player_inventory_after_drop(
     event: &CargoActionResult,
-    players: &Query<(), With<Player>>,
-    carried_items: &Query<(Option<&CarriedBy>, Option<&ContainedIn>), With<CargoStats>>,
-    containers: &Query<&CarriedBy, With<Container>>,
+    players: &Query<Option<&CarriedItems>, With<Player>>,
+    cargo_items: &Query<(), With<CargoStats>>,
+    containers: &Query<&ContainerContents, With<Container>>,
     inventory_menu: &mut InventoryMenuState,
 ) {
-    if event.action != CargoAction::Drop || players.get(event.actor).is_err() {
+    if event.action != CargoAction::Drop {
         return;
     }
-
-    let carried_count = carried_items
-        .iter()
-        .filter(|(carried_by, contained_in)| {
-            item_carried_by_actor(*carried_by, *contained_in, containers, event.actor)
-        })
-        .count();
-    inventory_menu.clamp_to_item_count(carried_count);
-}
-
-fn item_carried_by_actor(
-    carried_by: Option<&CarriedBy>,
-    contained_in: Option<&ContainedIn>,
-    containers: &Query<&CarriedBy, With<Container>>,
-    actor: Entity,
-) -> bool {
-    carried_by.is_some_and(|carried_by| carried_by.holder == actor)
-        || contained_in.is_some_and(|contained_in| {
-            containers
-                .get(contained_in.container)
-                .is_ok_and(|carried_by| carried_by.holder == actor)
-        })
+    let Ok(carried_items) = players.get(event.actor) else {
+        return;
+    };
+    inventory_menu.clamp_to_item_count(carried_cargo_count(carried_items, cargo_items, containers));
 }
 
 #[cfg(test)]

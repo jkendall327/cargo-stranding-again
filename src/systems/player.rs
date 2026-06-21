@@ -4,8 +4,8 @@ mod cargo;
 mod movement;
 
 use crate::cargo::{
-    derived_load, Cargo, CargoStats, CargoTarget, CarriedBy, CarriedItems, ContainedIn, Container,
-    ContainerContents, Item, ParcelDelivery,
+    carried_cargo_count, derived_load, Cargo, CargoStats, CargoTarget, CarriedBy, CarriedItems,
+    ContainedIn, Container, ContainerContents, Item, ParcelDelivery,
 };
 use crate::components::*;
 use crate::energy::ActionEnergy;
@@ -63,29 +63,10 @@ pub fn open_inventory_from_player_intent(
         return;
     }
 
-    let carried_count = carried_item_count(carried_items, &cargo_items, &containers);
+    let carried_count = carried_cargo_count(carried_items, &cargo_items, &containers);
     inventory_menu.clamp_to_item_count(carried_count);
     *screen = GameScreen::InventoryMenu;
     tracing::debug!(carried_count, "opened inventory");
-}
-
-fn carried_item_count(
-    carried_items: Option<&CarriedItems>,
-    cargo_items: &Query<(), With<CargoStats>>,
-    containers: &Query<&ContainerContents, With<Container>>,
-) -> usize {
-    carried_items
-        .into_iter()
-        .flat_map(|items| items.iter())
-        .filter(|entity| cargo_items.contains(*entity))
-        .count()
-        + carried_items
-            .into_iter()
-            .flat_map(|items| items.iter())
-            .filter_map(|entity| containers.get(entity).ok())
-            .flat_map(|items| items.iter())
-            .filter(|entity| cargo_items.contains(*entity))
-            .count()
 }
 
 pub fn pick_up_player_item_from_intent(

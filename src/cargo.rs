@@ -144,6 +144,47 @@ pub struct ContainedLoad {
     pub contained_in: ContainedIn,
 }
 
+/// Lists cargo entities held directly or inside directly carried containers.
+///
+/// This is the lightweight query-oriented form used by systems that only need
+/// entity IDs. Higher-level UI code can use `carried_items` when it needs
+/// weights, labels, and slot/container display state.
+pub fn carried_cargo_entities(
+    carried_items: Option<&CarriedItems>,
+    cargo_items: &Query<(), With<CargoStats>>,
+    containers: &Query<&ContainerContents, With<Container>>,
+) -> Vec<Entity> {
+    let direct_items = carried_items
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .collect::<Vec<_>>();
+
+    let mut cargo = direct_items
+        .iter()
+        .copied()
+        .filter(|entity| cargo_items.contains(*entity))
+        .collect::<Vec<_>>();
+    for container in direct_items {
+        let Ok(contained_items) = containers.get(container) else {
+            continue;
+        };
+        cargo.extend(
+            contained_items
+                .iter()
+                .filter(|entity| cargo_items.contains(*entity)),
+        );
+    }
+    cargo
+}
+
+pub fn carried_cargo_count(
+    carried_items: Option<&CarriedItems>,
+    cargo_items: &Query<(), With<CargoStats>>,
+    containers: &Query<&ContainerContents, With<Container>>,
+) -> usize {
+    carried_cargo_entities(carried_items, cargo_items, containers).len()
+}
+
 /// Lists parcel cargo currently carried by a holder, independent of slot.
 pub fn carried_parcels(world: &mut World, holder: Entity) -> Vec<CarriedParcelEntry> {
     carried_items(world, holder)

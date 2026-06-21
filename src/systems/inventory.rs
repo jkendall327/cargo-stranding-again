@@ -1,6 +1,8 @@
 use bevy_ecs::prelude::*;
 
-use crate::cargo::{CargoStats, CarriedItems, Container, ContainerContents};
+use crate::cargo::{
+    carried_cargo_entities, CargoStats, CarriedItems, Container, ContainerContents,
+};
 use crate::components::{ActionEnergy, Player, Position};
 use crate::resources::{EnergyTimeline, InventoryAction, InventoryIntent, InventoryMenuState};
 use crate::systems::DropRequest;
@@ -9,7 +11,7 @@ pub fn inventory_actions(
     timeline: Res<EnergyTimeline>,
     mut intent: ResMut<InventoryIntent>,
     mut inventory_menu: ResMut<InventoryMenuState>,
-    player: Query<(Entity, &Position, &ActionEnergy, Option<&CarriedItems>), With<Player>>,
+    player: Single<(Entity, &Position, &ActionEnergy, Option<&CarriedItems>), With<Player>>,
     cargo_items: Query<(), With<CargoStats>>,
     containers: Query<&ContainerContents, With<Container>>,
     mut drop_requests: MessageWriter<DropRequest>,
@@ -21,13 +23,10 @@ pub fn inventory_actions(
 
     match action {
         InventoryAction::DropSelected => {
-            let Some(player) = player.iter().next() else {
-                return;
-            };
             drop_selected_inventory_item(
                 &timeline,
                 &mut inventory_menu,
-                player,
+                player.into_inner(),
                 &cargo_items,
                 &containers,
                 &mut drop_requests,
@@ -49,7 +48,7 @@ fn drop_selected_inventory_item(
         return false;
     }
 
-    let mut items = carried_item_entities(carried_items, cargo_items, containers);
+    let mut items = carried_cargo_entities(carried_items, cargo_items, containers);
     items.sort_by_key(|entity| entity.to_bits());
     inventory_menu.clamp_to_item_count(items.len());
 
@@ -72,32 +71,4 @@ fn drop_selected_inventory_item(
     );
 
     true
-}
-
-fn carried_item_entities(
-    carried_items: Option<&CarriedItems>,
-    cargo_items: &Query<(), With<CargoStats>>,
-    containers: &Query<&ContainerContents, With<Container>>,
-) -> Vec<Entity> {
-    let direct_items = carried_items
-        .into_iter()
-        .flat_map(|items| items.iter())
-        .collect::<Vec<_>>();
-
-    let mut items = direct_items
-        .iter()
-        .copied()
-        .filter(|entity| cargo_items.contains(*entity))
-        .collect::<Vec<_>>();
-    for container in direct_items {
-        let Ok(contained_items) = containers.get(container) else {
-            continue;
-        };
-        items.extend(
-            contained_items
-                .iter()
-                .filter(|entity| cargo_items.contains(*entity)),
-        );
-    }
-    items
 }
