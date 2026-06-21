@@ -1,12 +1,13 @@
 use std::path::PathBuf;
 
-use bevy_ecs::prelude::*;
-use macroquad::prelude::*;
+use bevy::prelude::*;
+use bevy::window::WindowResolution;
+use bevy_ecs::prelude::{Resource, Schedule, World};
 
 use crate::persistence::{
     load_save_slot, player_can_save, save_slot, CharacterId, SaveEligibility, SaveSlotIds, WorldId,
 };
-use crate::render;
+use crate::render::{self, initial_window_height, initial_window_width};
 use crate::resources::{
     GameScreen, PersistenceAction, PersistenceIntent, PersistenceStatus, PlayerIntent,
 };
@@ -19,6 +20,11 @@ const DEBUG_SAVE_IDS: SaveSlotIds = SaveSlotIds {
     character_id: CharacterId(1),
 };
 
+/// Bevy app resource that owns the deterministic simulation world.
+///
+/// The window, input, and rendering are Bevy-native now, while the game rules
+/// remain in the standalone ECS world shared with the headless harness.
+#[derive(Resource)]
 pub struct Game {
     world: World,
     simulation: SimulationRunner,
@@ -48,17 +54,18 @@ impl Game {
         }
     }
 
-    pub async fn run(&mut self) {
-        loop {
-            self.run_frame();
-            next_frame().await;
-        }
+    pub fn world(&self) -> &World {
+        &self.world
     }
 
-    fn run_frame(&mut self) {
-        // Macroquad owns the outer async frame loop and immediate-mode input.
-        // Each frame we copy only the compact input intent into an ECS resource.
-        crate::input::copy_to_ecs(&mut self.world);
+    pub fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
+    fn run_frame(&mut self, keyboard: &ButtonInput<KeyCode>, now_seconds: f64) {
+        // Bevy owns the outer frame loop and input devices. Each frame we copy
+        // only compact input intent into the deterministic simulation world.
+        crate::input::copy_to_ecs(&mut self.world, keyboard, now_seconds);
         self.menu_schedule.run(&mut self.world);
         self.handle_persistence_intent();
         self.simulation
@@ -72,10 +79,6 @@ impl Game {
         {
             self.simulation.run_player_intent(&mut self.world);
         }
-
-        // Rendering is deliberately a plain Macroquad function that manually
-        // queries ECS state. This keeps drawing separate from deterministic sim.
-        render::render(&mut self.world);
     }
 
     fn handle_persistence_intent(&mut self) {
@@ -136,6 +139,27 @@ impl Game {
         self.simulation = SimulationRunner::new();
         self.menu_schedule = schedules::menu_schedule();
     }
+}
+
+pub fn run() {
+    App::new()
+        .insert_resource(ClearColor(render::color_rgba(16, 18, 20, 255)))
+        .insert_resource(Game::new())
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Cargo Stranding Again".to_owned(),
+                resolution: WindowResolution::new(initial_window_width(), initial_window_height()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .add_systems(Startup, render::setup_camera)
+        .add_systems(Update, (tick_game, render::sync_render).chain())
+        .run();
+}
+
+fn tick_game(mut game: ResMut<Game>, keyboard: Res<ButtonInput<KeyCode>>, time: Res<Time>) {
+    game.run_frame(&keyboard, time.elapsed_secs_f64());
 }
 
 fn debug_save_path() -> PathBuf {

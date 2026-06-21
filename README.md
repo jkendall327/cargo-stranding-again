@@ -5,8 +5,8 @@ Vibecoded by Codex, though I am trying to stay close to the code.
 
 It uses:
 
-- `macroquad` for the async frame loop, windowing, input, and drawing.
-- `bevy_ecs` standalone for game state and simulation systems.
+- `bevy` for the window, input, frame loop, and 2D rendering.
+- `bevy_ecs` standalone for deterministic game state and simulation systems.
 
 ## Docs
 

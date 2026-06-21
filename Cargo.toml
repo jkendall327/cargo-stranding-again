@@ -4,8 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bevy = { version = "0.19", default-features = false, features = [
+    "default_app",
+    "std",
+    "multi_threaded",
+    "bevy_winit",
+    "x11",
+    "default_font",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_text",
+    "bevy_window",
+    "bevy_camera",
+    "bevy_color",
+    "bevy_image",
+    "keyboard",
+] }
 bevy_ecs = "0.19"
-macroquad = "0.4"
 pathfinding = "4.15.0"
 ron = { version = "0.12.1", features = ["integer128"] }
 serde = { version = "1.0.228", features = ["derive"] }

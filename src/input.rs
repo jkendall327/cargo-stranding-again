@@ -1,5 +1,6 @@
+use bevy::input::ButtonInput;
+use bevy::prelude::KeyCode;
 use bevy_ecs::prelude::*;
-use macroquad::prelude::*;
 
 use crate::resources::{
     Direction, GameScreen, InputRepeat, MenuAction, MenuInputState, PlayerAction, PlayerIntent,
@@ -22,19 +23,19 @@ impl Default for KeyBindings {
         Self {
             gameplay: vec![
                 KeyBinding {
-                    keys: vec![KeyCode::Left, KeyCode::A],
+                    keys: vec![KeyCode::ArrowLeft, KeyCode::KeyA],
                     action: PlayerAction::Move(Direction::West),
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::Right, KeyCode::D],
+                    keys: vec![KeyCode::ArrowRight, KeyCode::KeyD],
                     action: PlayerAction::Move(Direction::East),
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::Up, KeyCode::W],
+                    keys: vec![KeyCode::ArrowUp, KeyCode::KeyW],
                     action: PlayerAction::Move(Direction::North),
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::Down, KeyCode::S],
+                    keys: vec![KeyCode::ArrowDown, KeyCode::KeyS],
                     action: PlayerAction::Move(Direction::South),
                 },
                 KeyBinding {
@@ -42,15 +43,15 @@ impl Default for KeyBindings {
                     action: PlayerAction::Wait,
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::I, KeyCode::Tab],
+                    keys: vec![KeyCode::KeyI, KeyCode::Tab],
                     action: PlayerAction::OpenInventory,
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::E],
+                    keys: vec![KeyCode::KeyE],
                     action: PlayerAction::PickUp,
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::LeftShift, KeyCode::RightShift],
+                    keys: vec![KeyCode::ShiftLeft, KeyCode::ShiftRight],
                     action: PlayerAction::CycleMovementMode,
                 },
             ],
@@ -60,11 +61,11 @@ impl Default for KeyBindings {
                     action: MenuAction::Cancel,
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::Up, KeyCode::W],
+                    keys: vec![KeyCode::ArrowUp, KeyCode::KeyW],
                     action: MenuAction::MoveSelectionUp,
                 },
                 KeyBinding {
-                    keys: vec![KeyCode::Down, KeyCode::S],
+                    keys: vec![KeyCode::ArrowDown, KeyCode::KeyS],
                     action: MenuAction::MoveSelectionDown,
                 },
                 KeyBinding {
@@ -76,21 +77,21 @@ impl Default for KeyBindings {
     }
 }
 
-pub fn copy_to_ecs(world: &mut World) {
+pub fn copy_to_ecs(world: &mut World, keyboard: &ButtonInput<KeyCode>, now_seconds: f64) {
     let game_screen = *world.resource::<GameScreen>();
-    let menu_action = current_menu_action(game_screen, world.resource::<KeyBindings>());
+    let menu_action = current_menu_action(game_screen, world.resource::<KeyBindings>(), keyboard);
     *world.resource_mut::<MenuInputState>() = MenuInputState {
         action: menu_action,
     };
 
     if game_screen.allows_simulation() && menu_action.is_none() {
         let keybindings = world.resource::<KeyBindings>();
-        let held_action = current_held_action(keybindings);
-        let newly_pressed_action = current_pressed_action(keybindings);
+        let held_action = current_held_action(keybindings, keyboard);
+        let newly_pressed_action = current_pressed_action(keybindings, keyboard);
         let action = world.resource_mut::<InputRepeat>().action_for_frame(
             held_action,
             newly_pressed_action,
-            get_time(),
+            now_seconds,
         );
 
         *world.resource_mut::<PlayerIntent>() = PlayerIntent { action };
@@ -100,8 +101,12 @@ pub fn copy_to_ecs(world: &mut World) {
     }
 }
 
-fn current_menu_action(game_screen: GameScreen, keybindings: &KeyBindings) -> Option<MenuAction> {
-    let action = pressed_action(&keybindings.menu)?;
+fn current_menu_action(
+    game_screen: GameScreen,
+    keybindings: &KeyBindings,
+    keyboard: &ButtonInput<KeyCode>,
+) -> Option<MenuAction> {
+    let action = pressed_action(&keybindings.menu, keyboard)?;
     if action == MenuAction::Cancel {
         return Some(action);
     }
@@ -119,24 +124,33 @@ fn current_menu_action(game_screen: GameScreen, keybindings: &KeyBindings) -> Op
     }
 }
 
-fn current_held_action(keybindings: &KeyBindings) -> Option<PlayerAction> {
-    held_action(&keybindings.gameplay)
+fn current_held_action(
+    keybindings: &KeyBindings,
+    keyboard: &ButtonInput<KeyCode>,
+) -> Option<PlayerAction> {
+    held_action(&keybindings.gameplay, keyboard)
 }
 
-fn current_pressed_action(keybindings: &KeyBindings) -> Option<PlayerAction> {
-    pressed_action(&keybindings.gameplay)
+fn current_pressed_action(
+    keybindings: &KeyBindings,
+    keyboard: &ButtonInput<KeyCode>,
+) -> Option<PlayerAction> {
+    pressed_action(&keybindings.gameplay, keyboard)
 }
 
-fn held_action<T: Copy>(bindings: &[KeyBinding<T>]) -> Option<T> {
+fn held_action<T: Copy>(bindings: &[KeyBinding<T>], keyboard: &ButtonInput<KeyCode>) -> Option<T> {
     bindings
         .iter()
-        .find(|binding| binding.keys.iter().copied().any(is_key_down))
+        .find(|binding| binding.keys.iter().any(|key| keyboard.pressed(*key)))
         .map(|binding| binding.action)
 }
 
-fn pressed_action<T: Copy>(bindings: &[KeyBinding<T>]) -> Option<T> {
+fn pressed_action<T: Copy>(
+    bindings: &[KeyBinding<T>],
+    keyboard: &ButtonInput<KeyCode>,
+) -> Option<T> {
     bindings
         .iter()
-        .find(|binding| binding.keys.iter().copied().any(is_key_pressed))
+        .find(|binding| binding.keys.iter().any(|key| keyboard.just_pressed(*key)))
         .map(|binding| binding.action)
 }
